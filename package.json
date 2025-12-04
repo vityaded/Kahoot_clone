@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Real-time classroom quiz experience with typed answers and leaderboard.",
   "main": "server.js",
-  "type": "commonjs",
+  "type": "module",
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js"
