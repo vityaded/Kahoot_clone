@@ -12,6 +12,15 @@ const QUIZ_ROOM_PREFIX = 'quiz-';
 
 const quizzes = new Map();
 
+function buildMediaPayload(media = {}) {
+  if (!media.src || !media.type) return null;
+  return {
+    type: media.type,
+    src: media.src,
+    name: media.name || '',
+  };
+}
+
 function normalise(text = '') {
   return text.trim().toLowerCase();
 }
@@ -43,15 +52,21 @@ io.on('connection', (socket) => {
     }
     const sanitizedQuestions = questions
       .filter((q) => q && q.prompt && q.answer)
-      .map((q) => ({ prompt: q.prompt.trim(), answer: q.answer.trim() }));
+      .map((q) => ({
+        prompt: q.prompt.trim(),
+        answer: q.answer.trim(),
+        media: buildMediaPayload(q.media),
+      }));
     if (!sanitizedQuestions.length) {
       socket.emit('host:error', 'Questions need both prompts and answers.');
       return;
     }
 
     const quizId = nanoid(6).toUpperCase();
+    const hostKey = nanoid(10);
     quizzes.set(quizId, {
       id: quizId,
+      hostKey,
       title: title?.trim() || 'Classroom Quiz',
       hostId: socket.id,
       players: new Map(),
@@ -61,10 +76,31 @@ io.on('connection', (socket) => {
       questionStart: null,
       answers: new Set(),
       questionActive: false,
+      createdAt: Date.now(),
     });
 
     socket.join(`${QUIZ_ROOM_PREFIX}${quizId}`);
-    socket.emit('host:quizCreated', { quizId });
+    socket.emit('host:quizCreated', { quizId, hostKey });
+  });
+
+  socket.on('host:claimHost', ({ quizId, hostKey }) => {
+    const quiz = quizzes.get(quizId?.trim()?.toUpperCase());
+    if (!quiz || quiz.hostKey !== hostKey) {
+      socket.emit('host:error', 'Unable to find quiz with that code and host key.');
+      return;
+    }
+
+    quiz.hostId = socket.id;
+    socket.join(`${QUIZ_ROOM_PREFIX}${quiz.id}`);
+    socket.emit('host:claimed', {
+      quizId: quiz.id,
+      title: quiz.title,
+      totalQuestions: quiz.questions.length,
+      questionDuration: quiz.questionDuration,
+      leaderboard: formatLeaderboard(quiz),
+      currentQuestionIndex: quiz.currentQuestionIndex,
+      questionActive: quiz.questionActive,
+    });
   });
 
   socket.on('player:join', ({ quizId, name }) => {
@@ -118,6 +154,7 @@ io.on('connection', (socket) => {
       index: nextIndex + 1,
       total: quiz.questions.length,
       duration: quiz.questionDuration,
+      media: currentQuestion.media,
     });
   });
 
@@ -165,7 +202,8 @@ io.on('connection', (socket) => {
     for (const [quizId, quiz] of quizzes) {
       if (quiz.hostId === socket.id) {
         io.to(`${QUIZ_ROOM_PREFIX}${quizId}`).emit('quiz:ended');
-        quizzes.delete(quizId);
+        clearQuestionState(quiz);
+        quiz.hostId = null;
         continue;
       }
       if (quiz.players.has(socket.id)) {
@@ -180,6 +218,19 @@ app.use(express.static('public'));
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });
+});
+
+app.get('/api/quizzes', (_req, res) => {
+  const payload = Array.from(quizzes.values())
+    .map((quiz) => ({
+      id: quiz.id,
+      title: quiz.title,
+      questionCount: quiz.questions.length,
+      createdAt: quiz.createdAt,
+    }))
+    .sort((a, b) => b.createdAt - a.createdAt);
+
+  res.json(payload);
 });
 
 server.listen(PORT, () => {

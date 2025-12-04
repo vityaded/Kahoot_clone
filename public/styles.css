@@ -28,6 +28,12 @@ body.host {
   background: linear-gradient(120deg, #0b1021, #171f3b 45%, #0f152b);
 }
 
+body.library {
+  background: radial-gradient(circle at 20% 20%, #0f253d 0, transparent 25%),
+    radial-gradient(circle at 80% 0%, #2c1a3a 0, transparent 25%),
+    #0b1021;
+}
+
 .glow {
   position: fixed;
   inset: 0;
@@ -53,6 +59,23 @@ h2 {
   margin-top: 0;
 }
 
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.7);
+  margin-bottom: 6px;
+}
+
+.lede {
+  font-size: 1.1rem;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.muted {
+  color: rgba(255, 255, 255, 0.7);
+}
+
 p {
   margin: 8px 0;
 }
@@ -61,6 +84,45 @@ main.grid {
   display: grid;
   gap: 16px;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.grid.single {
+  max-width: 540px;
+  margin: 0 auto;
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 20px;
+  align-items: center;
+  padding: 12px 8px;
+}
+
+.hero-card {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.25);
+}
+
+.cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.cta-row .button,
+.cta-row .ghost,
+.quiz-actions .button,
+.quiz-actions .copy,
+a.button {
+  width: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .card {
@@ -90,6 +152,7 @@ input {
   color: var(--text);
 }
 
+.button,
 button {
   background: linear-gradient(135deg, #7cf0ff, #9f8bff);
   border: none;
@@ -102,19 +165,23 @@ button {
   margin: 8px 0;
   transition: transform 150ms ease, box-shadow 150ms ease, opacity 150ms ease;
   box-shadow: 0 10px 24px rgba(127, 225, 255, 0.35);
+  text-decoration: none;
 }
 
+.button:hover,
 button:hover {
   transform: translateY(-1px);
   box-shadow: 0 14px 28px rgba(127, 225, 255, 0.45);
 }
 
+.button:disabled,
 button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
   box-shadow: none;
 }
 
+.button.ghost,
 button.ghost {
   background: transparent;
   border: 1px solid rgba(255, 255, 255, 0.25);
@@ -147,11 +214,58 @@ button.ghost {
   gap: 12px;
 }
 
+.media-picker {
+  margin-top: 8px;
+  display: grid;
+  gap: 8px;
+}
+
+.file-label {
+  display: inline-block;
+  padding: 10px 12px;
+  border: 1px dashed rgba(255, 255, 255, 0.3);
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.file-label input {
+  display: block;
+  margin-top: 6px;
+}
+
+.preview img,
+.preview video,
+.preview audio,
+.media-preview img,
+.media-preview video,
+.media-preview audio {
+  width: 100%;
+  max-height: 220px;
+  object-fit: contain;
+  border-radius: 12px;
+}
+
+.preview,
+.media-preview {
+  background: rgba(255, 255, 255, 0.05);
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
 .question-row {
   border: 1px dashed rgba(255, 255, 255, 0.25);
   padding: 12px;
   border-radius: 12px;
   position: relative;
+}
+
+.credentials {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 12px;
+  border-radius: 12px;
+  margin-top: 10px;
 }
 
 .question-status {
@@ -184,6 +298,51 @@ button.ghost {
   justify-content: space-between;
   align-items: center;
   font-weight: 700;
+}
+
+.library-grid {
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.quiz-list {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.quiz-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+}
+
+.quiz-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.quiz-actions .copy {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.card-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
 }
 
 ul {

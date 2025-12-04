@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Join Quiz</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="glow"></div>
+  <header>
+    <h1>Join a live quiz</h1>
+    <p>Enter your name and the quiz code your host is sharing. You'll jump into the player view next.</p>
+    <div class="cta-row">
+      <a class="button ghost" href="/">Back to library</a>
+      <a class="button ghost" href="/play.html">Already joined? Go to player view</a>
+    </div>
+  </header>
+
+  <main class="grid single">
+    <section class="card">
+      <form id="join-form">
+        <label>
+          Your name
+          <input type="text" id="player-name" placeholder="Alex" required />
+        </label>
+        <label>
+          Quiz code
+          <input type="text" id="quiz-code" placeholder="ABC123" required />
+        </label>
+        <button type="submit">Continue</button>
+        <p id="join-error" class="error"></p>
+      </form>
+    </section>
+  </main>
+
+  <script>
+    const joinForm = document.getElementById('join-form');
+    const playerName = document.getElementById('player-name');
+    const quizCode = document.getElementById('quiz-code');
+    const joinError = document.getElementById('join-error');
+
+    joinForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      if (!playerName.value.trim() || !quizCode.value.trim()) {
+        joinError.textContent = 'Enter your name and the quiz code.';
+        return;
+      }
+      sessionStorage.setItem('playerName', playerName.value.trim());
+      sessionStorage.setItem('quizCode', quizCode.value.trim());
+      window.location.href = '/play.html';
+    });
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('quizId')) {
+      quizCode.value = params.get('quizId');
+    }
+  </script>
+</body>
+</html>

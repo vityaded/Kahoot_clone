@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Create Quiz</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="host">
+  <div class="glow"></div>
+  <header>
+    <h1>Design your quiz</h1>
+    <p>Write prompts, upload supporting media, and generate a quiz code plus host key for running the game.</p>
+    <div class="cta-row">
+      <a class="button ghost" href="/">Back to library</a>
+      <a class="button ghost" href="/run.html">Go to run page</a>
+    </div>
+  </header>
+
+  <main class="grid">
+    <section class="card">
+      <h2>Quiz details</h2>
+      <form id="quiz-form">
+        <label>
+          Quiz title
+          <input type="text" id="quiz-title" placeholder="Science quick-check" />
+        </label>
+        <label>
+          Seconds per question
+          <input type="number" id="question-duration" value="20" min="5" max="120" />
+        </label>
+        <div class="questions" id="question-list"></div>
+        <button type="button" class="ghost" id="add-question">+ Add question</button>
+        <button type="submit">Create quiz</button>
+        <p id="form-error" class="error"></p>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Quiz code</h2>
+      <div id="quiz-code" class="code">Waiting for quiz...</div>
+      <p class="muted">After creating you'll get a quiz code and a host key. Use both to run the game.</p>
+      <div id="host-credentials" class="credentials hidden">
+        <p><strong>Quiz code:</strong> <span id="code-value"></span></p>
+        <p><strong>Host key:</strong> <span id="host-key"></span></p>
+        <div class="cta-row">
+          <button id="copy-code" type="button" class="ghost">Copy code</button>
+          <button id="copy-host-key" type="button" class="ghost">Copy host key</button>
+          <a id="run-link" class="button" href="/run.html">Open run page</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const questionList = document.getElementById('question-list');
+    const addQuestionBtn = document.getElementById('add-question');
+    const form = document.getElementById('quiz-form');
+    const quizCodeEl = document.getElementById('quiz-code');
+    const formError = document.getElementById('form-error');
+    const credentials = document.getElementById('host-credentials');
+    const codeValue = document.getElementById('code-value');
+    const hostKeyValue = document.getElementById('host-key');
+    const runLink = document.getElementById('run-link');
+    const copyCodeBtn = document.getElementById('copy-code');
+    const copyHostKeyBtn = document.getElementById('copy-host-key');
+
+    function renderQuestionRow(index, prompt = '', answer = '') {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'question-row media';
+      wrapper.innerHTML = `
+        <div>
+          <label>Question ${index + 1}
+            <input type="text" name="prompt" placeholder="What is photosynthesis?" value="${prompt}" required />
+          </label>
+          <label>Expected answer
+            <input type="text" name="answer" placeholder="A process plants use to make food" value="${answer}" required />
+          </label>
+        </div>
+        <div class="media-picker">
+          <label class="file-label">Attach media (photo, audio, or video)
+            <input type="file" accept="image/*,audio/*,video/*" name="media" />
+          </label>
+          <div class="preview" aria-live="polite"></div>
+        </div>
+        <button type="button" class="ghost remove">Remove</button>
+      `;
+      wrapper.querySelector('.remove').addEventListener('click', () => {
+        wrapper.remove();
+        updateQuestionLabels();
+      });
+      wrapper.querySelector('input[name="media"]').addEventListener('change', (event) => {
+        const preview = wrapper.querySelector('.preview');
+        preview.innerHTML = '';
+        const file = event.target.files?.[0];
+        if (!file) return;
+        const type = file.type;
+        if (type.startsWith('image/')) {
+          preview.innerHTML = `<img src="${URL.createObjectURL(file)}" alt="Image preview" />`;
+        } else if (type.startsWith('audio/')) {
+          preview.innerHTML = `<audio controls src="${URL.createObjectURL(file)}"></audio>`;
+        } else if (type.startsWith('video/')) {
+          preview.innerHTML = `<video controls src="${URL.createObjectURL(file)}"></video>`;
+        } else {
+          preview.textContent = file.name;
+        }
+      });
+      questionList.appendChild(wrapper);
+    }
+
+    function updateQuestionLabels() {
+      questionList.querySelectorAll('.question-row').forEach((row, idx) => {
+        row.querySelector('label').innerHTML = `Question ${idx + 1}<input type="text" name="prompt" placeholder="What is photosynthesis?" value="${row.querySelector('input[name="prompt"]').value}" required />`;
+      });
+    }
+
+    function readFileAsDataURL(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = (error) => reject(error);
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function buildQuestions() {
+      const rows = Array.from(questionList.querySelectorAll('.question-row'));
+      const questions = [];
+      for (const row of rows) {
+        const prompt = row.querySelector('input[name="prompt"]').value;
+        const answer = row.querySelector('input[name="answer"]').value;
+        const mediaInput = row.querySelector('input[name="media"]');
+        const file = mediaInput?.files?.[0];
+        let media = null;
+        if (file) {
+          const src = await readFileAsDataURL(file);
+          let type = 'file';
+          if (file.type.startsWith('image/')) type = 'image';
+          else if (file.type.startsWith('audio/')) type = 'audio';
+          else if (file.type.startsWith('video/')) type = 'video';
+          media = { type, name: file.name, src };
+        }
+        questions.push({ prompt, answer, media });
+      }
+      return questions;
+    }
+
+    addQuestionBtn.addEventListener('click', () => renderQuestionRow(questionList.children.length));
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      formError.textContent = '';
+      quizCodeEl.textContent = 'Creating quiz...';
+      const questions = await buildQuestions();
+      const title = document.getElementById('quiz-title').value;
+      const questionDuration = document.getElementById('question-duration').value;
+
+      socket.emit('host:createQuiz', { title, questions, questionDuration });
+    });
+
+    socket.on('host:error', (message) => {
+      formError.textContent = message;
+      quizCodeEl.textContent = 'Waiting for quiz...';
+    });
+
+    socket.on('host:quizCreated', ({ quizId, hostKey }) => {
+      quizCodeEl.textContent = `Share this code: ${quizId}`;
+      credentials.classList.remove('hidden');
+      codeValue.textContent = quizId;
+      hostKeyValue.textContent = hostKey;
+      runLink.href = `/run.html?quizId=${quizId}&hostKey=${hostKey}`;
+      sessionStorage.setItem('quizId', quizId);
+      sessionStorage.setItem('hostKey', hostKey);
+    });
+
+    copyCodeBtn.addEventListener('click', () => {
+      if (!codeValue.textContent) return;
+      navigator.clipboard.writeText(codeValue.textContent);
+      copyCodeBtn.textContent = 'Copied!';
+      setTimeout(() => { copyCodeBtn.textContent = 'Copy code'; }, 1200);
+    });
+
+    copyHostKeyBtn.addEventListener('click', () => {
+      if (!hostKeyValue.textContent) return;
+      navigator.clipboard.writeText(hostKeyValue.textContent);
+      copyHostKeyBtn.textContent = 'Copied!';
+      setTimeout(() => { copyHostKeyBtn.textContent = 'Copy host key'; }, 1200);
+    });
+
+    renderQuestionRow(0);
+  </script>
+</body>
+</html>

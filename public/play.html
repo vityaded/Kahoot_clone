@@ -29,12 +29,14 @@
         <p id="join-error" class="error"></p>
       </form>
       <p id="lobby-status"></p>
+      <p class="muted">Need to start over? Go back to the <a href="/join.html">join page</a>.</p>
     </section>
 
     <section class="card">
       <h2>Question</h2>
       <div class="question-status" id="question-text">Waiting for the host to start...</div>
       <div class="timer" id="timer"></div>
+      <div class="media-preview" id="question-media"></div>
       <form id="answer-form" class="hidden">
         <label>
           Type your answer
@@ -65,16 +67,23 @@
     const answerInput = document.getElementById('answer-input');
     const answerFeedback = document.getElementById('answer-feedback');
     const leaderboard = document.getElementById('leaderboard');
+    const questionMedia = document.getElementById('question-media');
 
     let currentQuizId = null;
     let timerInterval = null;
 
-    joinForm.addEventListener('submit', (event) => {
-      event.preventDefault();
+    function joinQuiz() {
       socket.emit('player:join', {
         quizId: quizCode.value,
         name: playerName.value,
       });
+    }
+
+    joinForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      sessionStorage.setItem('playerName', playerName.value.trim());
+      sessionStorage.setItem('quizCode', quizCode.value.trim());
+      joinQuiz();
     });
 
     socket.on('player:joined', ({ quizId, title, totalQuestions }) => {
@@ -82,18 +91,20 @@
       joinError.textContent = '';
       lobbyStatus.textContent = `Joined "${title}". ${totalQuestions} question(s) coming up!`;
       answerFeedback.textContent = '';
+      joinForm.classList.add('hidden');
     });
 
     socket.on('player:error', (message) => {
       joinError.textContent = message;
     });
 
-    socket.on('question:start', ({ prompt, index, total, duration }) => {
+    socket.on('question:start', ({ prompt, index, total, duration, media }) => {
       questionText.textContent = `Q${index}/${total}: ${prompt}`;
       answerFeedback.textContent = '';
       answerForm.classList.remove('hidden');
       answerInput.value = '';
       answerInput.focus();
+      renderMedia(media);
       startTimer(duration);
     });
 
@@ -101,18 +112,21 @@
       stopTimer();
       questionText.textContent = `Time's up! Correct answer: ${correctAnswer}`;
       answerForm.classList.add('hidden');
+      questionMedia.innerHTML = '';
     });
 
     socket.on('quiz:finished', () => {
       stopTimer();
       questionText.textContent = 'Quiz finished! Check the leaderboard for final scores.';
       answerForm.classList.add('hidden');
+      questionMedia.innerHTML = '';
     });
 
     socket.on('quiz:ended', () => {
       stopTimer();
       questionText.textContent = 'The host left the game. Quiz closed.';
       answerForm.classList.add('hidden');
+      questionMedia.innerHTML = '';
     });
 
     socket.on('player:answerResult', ({ correct, earned, correctAnswer }) => {
@@ -125,6 +139,7 @@
       }
       answerForm.classList.add('hidden');
       stopTimer();
+      questionMedia.innerHTML = '';
     });
 
     socket.on('leaderboard:update', (players) => {
@@ -165,6 +180,26 @@
         clearInterval(timerInterval);
         timerInterval = null;
       }
+    }
+
+    function renderMedia(media) {
+      questionMedia.innerHTML = '';
+      if (!media) return;
+      if (media.type === 'image') {
+        questionMedia.innerHTML = `<img src="${media.src}" alt="Question media" />`;
+      } else if (media.type === 'audio') {
+        questionMedia.innerHTML = `<audio controls src="${media.src}"></audio>`;
+      } else if (media.type === 'video') {
+        questionMedia.innerHTML = `<video controls src="${media.src}"></video>`;
+      }
+    }
+
+    const storedName = sessionStorage.getItem('playerName');
+    const storedQuiz = sessionStorage.getItem('quizCode');
+    if (storedName && storedQuiz) {
+      playerName.value = storedName;
+      quizCode.value = storedQuiz;
+      joinQuiz();
     }
   </script>
 </body>
