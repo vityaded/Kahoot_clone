@@ -10,10 +10,9 @@
   <div class="glow"></div>
   <header>
     <h1>Join a live quiz</h1>
-    <p>Enter your name and the quiz code your host is sharing. You'll jump into the player view next.</p>
+    <p>Type the game code from your host to get started. We'll grab your nickname next.</p>
     <div class="cta-row">
       <a class="button ghost" href="/">Back to library</a>
-      <a class="button ghost" href="/play.html">Already joined? Go to player view</a>
     </div>
   </header>
 
@@ -21,11 +20,7 @@
     <section class="card">
       <form id="join-form">
         <label>
-          Your name
-          <input type="text" id="player-name" placeholder="Alex" required />
-        </label>
-        <label>
-          Quiz code
+          Game code
           <input type="text" id="quiz-code" placeholder="ABC123" required />
         </label>
         <button type="submit">Continue</button>
@@ -36,19 +31,19 @@
 
   <script>
     const joinForm = document.getElementById('join-form');
-    const playerName = document.getElementById('player-name');
     const quizCode = document.getElementById('quiz-code');
     const joinError = document.getElementById('join-error');
 
     joinForm.addEventListener('submit', (event) => {
       event.preventDefault();
-      if (!playerName.value.trim() || !quizCode.value.trim()) {
-        joinError.textContent = 'Enter your name and the quiz code.';
+      const code = quizCode.value.trim().toUpperCase();
+      if (!code) {
+        joinError.textContent = 'Enter the game code your host is showing.';
         return;
       }
-      sessionStorage.setItem('playerName', playerName.value.trim());
-      sessionStorage.setItem('quizCode', quizCode.value.trim());
-      window.location.href = '/play.html';
+      sessionStorage.setItem('quizCode', code);
+      sessionStorage.removeItem('playerName');
+      window.location.href = '/nickname.html';
     });
 
     const params = new URLSearchParams(window.location.search);
