@@ -1,0 +1,23 @@
+{
+  "name": "kahoot_clone",
+  "version": "1.0.0",
+  "description": "Real-time classroom quiz experience with typed answers and leaderboard.",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "quiz",
+    "socket.io",
+    "classroom"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^5.2.1",
+    "nanoid": "^5.1.6",
+    "socket.io": "^4.8.1"
+  }
+}
