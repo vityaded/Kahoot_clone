@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Join Live Quiz</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="glow"></div>
+  <header>
+    <h1>Join the Game</h1>
+    <p>Type your name, the join code from your teacher, and answer as quickly and accurately as you can.</p>
+  </header>
+
+  <main class="grid">
+    <section class="card">
+      <h2>Enter the lobby</h2>
+      <form id="join-form">
+        <label>
+          Your name
+          <input type="text" id="player-name" placeholder="Alex" required />
+        </label>
+        <label>
+          Quiz code
+          <input type="text" id="quiz-code" placeholder="ABC123" required />
+        </label>
+        <button type="submit">Join quiz</button>
+        <p id="join-error" class="error"></p>
+      </form>
+      <p id="lobby-status"></p>
+    </section>
+
+    <section class="card">
+      <h2>Question</h2>
+      <div class="question-status" id="question-text">Waiting for the host to start...</div>
+      <div class="timer" id="timer"></div>
+      <form id="answer-form" class="hidden">
+        <label>
+          Type your answer
+          <input type="text" id="answer-input" autocomplete="off" />
+        </label>
+        <button type="submit">Submit answer</button>
+      </form>
+      <p id="answer-feedback"></p>
+    </section>
+
+    <section class="card">
+      <h2>Leaderboard</h2>
+      <ul id="leaderboard"></ul>
+    </section>
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const joinForm = document.getElementById('join-form');
+    const playerName = document.getElementById('player-name');
+    const quizCode = document.getElementById('quiz-code');
+    const joinError = document.getElementById('join-error');
+    const lobbyStatus = document.getElementById('lobby-status');
+    const questionText = document.getElementById('question-text');
+    const timerEl = document.getElementById('timer');
+    const answerForm = document.getElementById('answer-form');
+    const answerInput = document.getElementById('answer-input');
+    const answerFeedback = document.getElementById('answer-feedback');
+    const leaderboard = document.getElementById('leaderboard');
+
+    let currentQuizId = null;
+    let timerInterval = null;
+
+    joinForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      socket.emit('player:join', {
+        quizId: quizCode.value,
+        name: playerName.value,
+      });
+    });
+
+    socket.on('player:joined', ({ quizId, title, totalQuestions }) => {
+      currentQuizId = quizId;
+      joinError.textContent = '';
+      lobbyStatus.textContent = `Joined "${title}". ${totalQuestions} question(s) coming up!`;
+      answerFeedback.textContent = '';
+    });
+
+    socket.on('player:error', (message) => {
+      joinError.textContent = message;
+    });
+
+    socket.on('question:start', ({ prompt, index, total, duration }) => {
+      questionText.textContent = `Q${index}/${total}: ${prompt}`;
+      answerFeedback.textContent = '';
+      answerForm.classList.remove('hidden');
+      answerInput.value = '';
+      answerInput.focus();
+      startTimer(duration);
+    });
+
+    socket.on('question:end', ({ correctAnswer }) => {
+      stopTimer();
+      questionText.textContent = `Time's up! Correct answer: ${correctAnswer}`;
+      answerForm.classList.add('hidden');
+    });
+
+    socket.on('quiz:finished', () => {
+      stopTimer();
+      questionText.textContent = 'Quiz finished! Check the leaderboard for final scores.';
+      answerForm.classList.add('hidden');
+    });
+
+    socket.on('quiz:ended', () => {
+      stopTimer();
+      questionText.textContent = 'The host left the game. Quiz closed.';
+      answerForm.classList.add('hidden');
+    });
+
+    socket.on('player:answerResult', ({ correct, earned, correctAnswer }) => {
+      if (correct) {
+        answerFeedback.textContent = `Correct! +${earned} points`;
+        answerFeedback.className = 'success';
+      } else {
+        answerFeedback.textContent = `Not quite. Correct answer: ${correctAnswer}`;
+        answerFeedback.className = 'error';
+      }
+      answerForm.classList.add('hidden');
+      stopTimer();
+    });
+
+    socket.on('leaderboard:update', (players) => {
+      leaderboard.innerHTML = '';
+      players.forEach((player, index) => {
+        const li = document.createElement('li');
+        li.innerHTML = `<span>${index + 1}. ${player.name}</span><span>${player.score} pts</span>`;
+        leaderboard.appendChild(li);
+      });
+    });
+
+    answerForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      if (!currentQuizId) return;
+      socket.emit('player:answer', {
+        quizId: currentQuizId,
+        answer: answerInput.value,
+      });
+    });
+
+    function startTimer(seconds) {
+      stopTimer();
+      let remaining = seconds;
+      timerEl.textContent = `${remaining}s remaining`;
+      timerInterval = setInterval(() => {
+        remaining -= 1;
+        if (remaining <= 0) {
+          timerEl.textContent = 'Time!';
+          stopTimer();
+          return;
+        }
+        timerEl.textContent = `${remaining}s remaining`;
+      }, 1000);
+    }
+
+    function stopTimer() {
+      if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+      }
+    }
+  </script>
+</body>
+</html>

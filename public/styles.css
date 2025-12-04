@@ -1,0 +1,245 @@
+:root {
+  --bg: radial-gradient(circle at 20% 20%, #4dd0ff 0, transparent 25%),
+    radial-gradient(circle at 80% 0%, #ff9bf4 0, transparent 25%),
+    #0b1021;
+  --card: rgba(255, 255, 255, 0.08);
+  --text: #f8fbff;
+  --accent: #7cf0ff;
+  --success: #b2f59b;
+  --error: #ff8fa3;
+  --shadow: rgba(0, 0, 0, 0.3);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  padding: 24px;
+  overflow-x: hidden;
+}
+
+body.host {
+  background: linear-gradient(120deg, #0b1021, #171f3b 45%, #0f152b);
+}
+
+.glow {
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(circle at 20% 30%, rgba(255, 255, 255, 0.12), transparent 45%),
+    radial-gradient(circle at 80% 60%, rgba(255, 255, 255, 0.08), transparent 45%);
+  pointer-events: none;
+  filter: blur(60px);
+  z-index: -1;
+}
+
+header {
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+h1 {
+  margin: 0 0 8px;
+  font-size: 2.4rem;
+  letter-spacing: 0.02em;
+}
+
+h2 {
+  margin-top: 0;
+}
+
+p {
+  margin: 8px 0;
+}
+
+main.grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 16px;
+  padding: 16px 18px;
+  box-shadow: 0 12px 40px var(--shadow);
+  position: relative;
+  overflow: hidden;
+  backdrop-filter: blur(4px);
+}
+
+label {
+  display: block;
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+
+input {
+  width: 100%;
+  padding: 10px 12px;
+  margin-top: 6px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+}
+
+button {
+  background: linear-gradient(135deg, #7cf0ff, #9f8bff);
+  border: none;
+  color: #0c0f21;
+  padding: 12px 18px;
+  border-radius: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  width: 100%;
+  margin: 8px 0;
+  transition: transform 150ms ease, box-shadow 150ms ease, opacity 150ms ease;
+  box-shadow: 0 10px 24px rgba(127, 225, 255, 0.35);
+}
+
+button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 28px rgba(127, 225, 255, 0.45);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+button.ghost {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: var(--text);
+  box-shadow: none;
+}
+
+.error {
+  color: var(--error);
+  font-weight: 600;
+}
+
+.success {
+  color: var(--success);
+  font-weight: 700;
+}
+
+.code {
+  font-size: 1.4rem;
+  letter-spacing: 0.08em;
+  text-align: center;
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.questions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.question-row {
+  border: 1px dashed rgba(255, 255, 255, 0.25);
+  padding: 12px;
+  border-radius: 12px;
+  position: relative;
+}
+
+.question-status {
+  background: rgba(0, 0, 0, 0.35);
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  min-height: 60px;
+  display: flex;
+  align-items: center;
+}
+
+.question-status.active {
+  animation: pulse 0.8s ease;
+}
+
+.timer {
+  font-weight: 800;
+  font-size: 1.4rem;
+  text-align: center;
+  margin: 10px 0;
+}
+
+.leaderboard {
+  margin-top: 12px;
+}
+
+.leaderboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 700;
+}
+
+ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+ul li {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.hidden {
+  display: none;
+}
+
+.confetti {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.confetti span {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  animation: pop 1.2s ease forwards;
+  transform: translate(var(--x), var(--y)) scale(0);
+}
+
+@keyframes pop {
+  0% {
+    opacity: 0.9;
+    transform: translate(var(--x), var(--y)) scale(0.6);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(calc(var(--x) * 2), calc(var(--y) * 2)) scale(0.1);
+  }
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.01);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
