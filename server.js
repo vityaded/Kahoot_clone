@@ -8,6 +8,7 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || '0.0.0.0';
 const QUIZ_ROOM_PREFIX = 'quiz-';
 
 const quizzes = new Map();
@@ -233,7 +234,7 @@ app.get('/api/quizzes', (_req, res) => {
   res.json(payload);
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, HOST, () => {
   /* eslint-disable no-console */
-  console.log(`Quiz server listening on http://localhost:${PORT}`);
+  console.log(`Quiz server listening on http://${HOST}:${PORT}`);
 });
