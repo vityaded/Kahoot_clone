@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Classroom Quiz Host</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="host">
+  <div class="glow"></div>
+  <header>
+    <h1>Live Quiz Host</h1>
+    <p>Create a quiz with typed answers, share the join code, and lead your students through live questions.</p>
+  </header>
+
+  <main class="grid">
+    <section class="card">
+      <h2>1) Build your quiz</h2>
+      <form id="quiz-form">
+        <label>
+          Quiz title
+          <input type="text" id="quiz-title" placeholder="Science quick-check" />
+        </label>
+        <label>
+          Seconds per question
+          <input type="number" id="question-duration" value="20" min="5" max="120" />
+        </label>
+        <div class="questions" id="question-list"></div>
+        <button type="button" class="ghost" id="add-question">+ Add question</button>
+        <button type="submit">Create quiz</button>
+        <p id="form-error" class="error"></p>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>2) Share the join code</h2>
+      <div id="quiz-code" class="code">Waiting for quiz...</div>
+      <p>Students join at <code>/play</code> using the code.</p>
+      <div class="leaderboard">
+        <div class="leaderboard-header">
+          <span>Leaderboard</span>
+          <span id="player-count">0 players</span>
+        </div>
+        <ul id="leaderboard-list"></ul>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>3) Run the game</h2>
+      <div id="question-status" class="question-status">No question running.</div>
+      <button type="button" id="start-question" disabled>Start next question</button>
+      <button type="button" id="end-question" class="ghost" disabled>End current question</button>
+    </section>
+  </main>
+
+  <audio id="loop-audio" loop>
+    <source src="https://upload.wikimedia.org/wikipedia/commons/transcoded/0/07/Acoustic_Loop_-_EMF.wav/Acoustic_Loop_-_EMF.wav.mp3" type="audio/mpeg" />
+  </audio>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const questionList = document.getElementById('question-list');
+    const addQuestionBtn = document.getElementById('add-question');
+    const form = document.getElementById('quiz-form');
+    const quizCodeEl = document.getElementById('quiz-code');
+    const formError = document.getElementById('form-error');
+    const playerCount = document.getElementById('player-count');
+    const leaderboardList = document.getElementById('leaderboard-list');
+    const startQuestionBtn = document.getElementById('start-question');
+    const endQuestionBtn = document.getElementById('end-question');
+    const questionStatus = document.getElementById('question-status');
+    const loopAudio = document.getElementById('loop-audio');
+
+    let quizId = null;
+
+    function renderQuestionRow(index, prompt = '', answer = '') {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'question-row';
+      wrapper.innerHTML = `
+        <div>
+          <label>Question ${index + 1}
+            <input type="text" name="prompt" placeholder="What is photosynthesis?" value="${prompt}" required />
+          </label>
+          <label>Expected answer
+            <input type="text" name="answer" placeholder="A process plants use to make food" value="${answer}" required />
+          </label>
+        </div>
+        <button type="button" class="ghost remove">Remove</button>
+      `;
+      wrapper.querySelector('.remove').addEventListener('click', () => {
+        wrapper.remove();
+        updateQuestionLabels();
+      });
+      questionList.appendChild(wrapper);
+    }
+
+    function updateQuestionLabels() {
+      questionList.querySelectorAll('.question-row').forEach((row, idx) => {
+        row.querySelector('label').innerHTML = `Question ${idx + 1}<input type="text" name="prompt" placeholder="What is photosynthesis?" value="${row.querySelector('input[name="prompt"]').value}" required />`;
+      });
+    }
+
+    function buildQuestions() {
+      return Array.from(questionList.querySelectorAll('.question-row')).map((row) => ({
+        prompt: row.querySelector('input[name="prompt"]').value,
+        answer: row.querySelector('input[name="answer"]').value,
+      }));
+    }
+
+    addQuestionBtn.addEventListener('click', () => renderQuestionRow(questionList.children.length));
+
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const questions = buildQuestions();
+      const title = document.getElementById('quiz-title').value;
+      const questionDuration = document.getElementById('question-duration').value;
+
+      socket.emit('host:createQuiz', { title, questions, questionDuration });
+    });
+
+    socket.on('host:error', (message) => {
+      formError.textContent = message;
+    });
+
+    socket.on('host:quizCreated', ({ quizId: id }) => {
+      quizId = id;
+      quizCodeEl.textContent = `Share this code: ${quizId}`;
+      startQuestionBtn.disabled = false;
+      endQuestionBtn.disabled = true;
+      formError.textContent = '';
+      loopAudio.volume = 0.3;
+      loopAudio.play().catch(() => {});
+    });
+
+    socket.on('host:playerJoined', (players) => {
+      playerCount.textContent = `${players.length} player${players.length === 1 ? '' : 's'}`;
+    });
+
+    socket.on('leaderboard:update', (players) => {
+      leaderboardList.innerHTML = '';
+      players.forEach((player, index) => {
+        const item = document.createElement('li');
+        item.innerHTML = `<span>${index + 1}. ${player.name}</span><span>${player.score} pts</span>`;
+        leaderboardList.appendChild(item);
+      });
+    });
+
+    startQuestionBtn.addEventListener('click', () => {
+      if (!quizId) return;
+      socket.emit('host:startQuestion', { quizId });
+    });
+
+    endQuestionBtn.addEventListener('click', () => {
+      if (!quizId) return;
+      socket.emit('host:endQuestion', { quizId });
+    });
+
+    socket.on('question:start', ({ prompt, index, total, duration }) => {
+      questionStatus.textContent = `Question ${index}/${total}: ${prompt}`;
+      startQuestionBtn.disabled = true;
+      endQuestionBtn.disabled = false;
+      questionStatus.classList.add('active');
+      setTimeout(() => questionStatus.classList.remove('active'), 500);
+      launchConfetti();
+      countdown(duration);
+    });
+
+    socket.on('question:end', ({ correctAnswer }) => {
+      questionStatus.textContent = `Question ended. Correct answer: ${correctAnswer}`;
+      startQuestionBtn.disabled = false;
+      endQuestionBtn.disabled = true;
+      questionStatus.classList.remove('active');
+    });
+
+    socket.on('quiz:finished', () => {
+      questionStatus.textContent = 'Quiz complete! Share the leaderboard.';
+      startQuestionBtn.disabled = true;
+      endQuestionBtn.disabled = true;
+      loopAudio.pause();
+    });
+
+    function countdown(seconds) {
+      let remaining = seconds;
+      const timer = setInterval(() => {
+        if (remaining <= 0) {
+          clearInterval(timer);
+          questionStatus.textContent = 'Time\'s up!';
+          startQuestionBtn.disabled = false;
+          endQuestionBtn.disabled = true;
+          return;
+        }
+        questionStatus.textContent = `${remaining}s left...`;
+        remaining -= 1;
+      }, 1000);
+    }
+
+    function launchConfetti() {
+      const burst = document.createElement('div');
+      burst.className = 'confetti';
+      for (let i = 0; i < 30; i += 1) {
+        const dot = document.createElement('span');
+        dot.style.setProperty('--x', `${(Math.random() - 0.5) * 200}px`);
+        dot.style.setProperty('--y', `${Math.random() * -200}px`);
+        dot.style.background = `hsl(${Math.random() * 360}, 80%, 60%)`;
+        burst.appendChild(dot);
+      }
+      document.body.appendChild(burst);
+      setTimeout(() => burst.remove(), 1200);
+    }
+
+    renderQuestionRow(0);
+  </script>
+</body>
+</html>
