@@ -13,8 +13,8 @@ const QUIZ_ROOM_PREFIX = 'quiz-';
 
 const quizzes = new Map();
 
-function buildMediaPayload(media = {}) {
-  if (!media.src || !media.type) return null;
+function buildMediaPayload(media) {
+  if (!media || !media.src || !media.type) return null;
   return {
     type: media.type,
     src: media.src,
