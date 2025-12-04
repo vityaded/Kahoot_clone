@@ -3,64 +3,51 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Join Live Quiz</title>
+  <title>Live Game</title>
   <link rel="stylesheet" href="/styles.css" />
 </head>
-<body>
+<body class="player-view">
   <div class="glow"></div>
-  <header>
-    <h1>Join the Game</h1>
-    <p>Type your name, the join code from your teacher, and answer as quickly and accurately as you can.</p>
-  </header>
+  <main class="player-container">
+    <div class="player-status" id="lobby-status">Connecting to the game...</div>
+    <p id="join-error" class="error"></p>
 
-  <main class="grid">
-    <section class="card">
-      <h2>Enter the lobby</h2>
-      <form id="join-form">
-        <label>
-          Your name
-          <input type="text" id="player-name" placeholder="Alex" required />
-        </label>
-        <label>
-          Quiz code
-          <input type="text" id="quiz-code" placeholder="ABC123" required />
-        </label>
-        <button type="submit">Join quiz</button>
-        <p id="join-error" class="error"></p>
-      </form>
-      <p id="lobby-status"></p>
-      <p class="muted">Need to start over? Go back to the <a href="/join.html">join page</a>.</p>
+    <section class="question-board">
+      <div class="corner-badge" id="question-progress">Waiting for host...</div>
+      <div class="corner-badge timer" id="timer">--</div>
+      <div class="question-content">
+        <p class="eyebrow">Question</p>
+        <h1 id="question-text">Waiting for the host to start...</h1>
+        <div class="media-preview" id="question-media"></div>
+      </div>
     </section>
 
-    <section class="card">
-      <h2>Question</h2>
-      <div class="question-status" id="question-text">Waiting for the host to start...</div>
-      <div class="timer" id="timer"></div>
-      <div class="media-preview" id="question-media"></div>
-      <form id="answer-form" class="hidden">
+    <section class="response-panel">
+      <form id="answer-form" class="answer-card hidden">
         <label>
           Type your answer
           <input type="text" id="answer-input" autocomplete="off" />
         </label>
         <button type="submit">Submit answer</button>
+        <p class="muted">We'll lock it in right away, so double check before sending.</p>
       </form>
-      <p id="answer-feedback"></p>
-    </section>
 
-    <section class="card">
-      <h2>Leaderboard</h2>
-      <ul id="leaderboard"></ul>
+      <div class="card leaderboard-card">
+        <div class="leaderboard-header">
+          <h2>Leaderboard</h2>
+          <p class="muted">Live rankings</p>
+        </div>
+        <p id="answer-feedback"></p>
+        <ul id="leaderboard"></ul>
+      </div>
     </section>
   </main>
 
   <script src="/socket.io/socket.io.js"></script>
   <script>
     const socket = io();
-    const joinForm = document.getElementById('join-form');
-    const playerName = document.getElementById('player-name');
-    const quizCode = document.getElementById('quiz-code');
-    const joinError = document.getElementById('join-error');
     const lobbyStatus = document.getElementById('lobby-status');
+    const joinError = document.getElementById('join-error');
     const questionText = document.getElementById('question-text');
     const timerEl = document.getElementById('timer');
     const answerForm = document.getElementById('answer-form');
@@ -68,39 +55,42 @@
     const answerFeedback = document.getElementById('answer-feedback');
     const leaderboard = document.getElementById('leaderboard');
     const questionMedia = document.getElementById('question-media');
+    const questionProgress = document.getElementById('question-progress');
+
+    const storedName = sessionStorage.getItem('playerName');
+    const storedQuiz = sessionStorage.getItem('quizCode');
+    if (!storedName || !storedQuiz) {
+      window.location.href = '/join.html';
+    }
 
     let currentQuizId = null;
     let timerInterval = null;
 
     function joinQuiz() {
+      lobbyStatus.textContent = 'Joining game...';
       socket.emit('player:join', {
-        quizId: quizCode.value,
-        name: playerName.value,
+        quizId: storedQuiz,
+        name: storedName,
       });
     }
-
-    joinForm.addEventListener('submit', (event) => {
-      event.preventDefault();
-      sessionStorage.setItem('playerName', playerName.value.trim());
-      sessionStorage.setItem('quizCode', quizCode.value.trim());
-      joinQuiz();
-    });
 
     socket.on('player:joined', ({ quizId, title, totalQuestions }) => {
       currentQuizId = quizId;
       joinError.textContent = '';
-      lobbyStatus.textContent = `Joined "${title}". ${totalQuestions} question(s) coming up!`;
+      lobbyStatus.textContent = `Joined "${title}". Waiting for the first question...`;
       answerFeedback.textContent = '';
-      joinForm.classList.add('hidden');
     });
 
     socket.on('player:error', (message) => {
       joinError.textContent = message;
+      lobbyStatus.textContent = 'Unable to join. Please re-enter the code and nickname.';
     });
 
     socket.on('question:start', ({ prompt, index, total, duration, media }) => {
-      questionText.textContent = `Q${index}/${total}: ${prompt}`;
+      questionProgress.textContent = `Question ${index} of ${total}`;
+      questionText.textContent = prompt;
       answerFeedback.textContent = '';
+      answerFeedback.className = '';
       answerForm.classList.remove('hidden');
       answerInput.value = '';
       answerInput.focus();
@@ -113,20 +103,25 @@
       questionText.textContent = `Time's up! Correct answer: ${correctAnswer}`;
       answerForm.classList.add('hidden');
       questionMedia.innerHTML = '';
+      timerEl.textContent = '--';
     });
 
     socket.on('quiz:finished', () => {
       stopTimer();
+      questionProgress.textContent = 'Quiz finished';
       questionText.textContent = 'Quiz finished! Check the leaderboard for final scores.';
       answerForm.classList.add('hidden');
       questionMedia.innerHTML = '';
+      timerEl.textContent = '--';
     });
 
     socket.on('quiz:ended', () => {
       stopTimer();
+      questionProgress.textContent = 'Quiz closed';
       questionText.textContent = 'The host left the game. Quiz closed.';
       answerForm.classList.add('hidden');
       questionMedia.innerHTML = '';
+      timerEl.textContent = '--';
     });
 
     socket.on('player:answerResult', ({ correct, earned, correctAnswer }) => {
@@ -163,7 +158,7 @@
     function startTimer(seconds) {
       stopTimer();
       let remaining = seconds;
-      timerEl.textContent = `${remaining}s remaining`;
+      timerEl.textContent = `${remaining}s`;
       timerInterval = setInterval(() => {
         remaining -= 1;
         if (remaining <= 0) {
@@ -171,7 +166,7 @@
           stopTimer();
           return;
         }
-        timerEl.textContent = `${remaining}s remaining`;
+        timerEl.textContent = `${remaining}s`;
       }, 1000);
     }
 
@@ -194,13 +189,7 @@
       }
     }
 
-    const storedName = sessionStorage.getItem('playerName');
-    const storedQuiz = sessionStorage.getItem('quizCode');
-    if (storedName && storedQuiz) {
-      playerName.value = storedName;
-      quizCode.value = storedQuiz;
-      joinQuiz();
-    }
+    joinQuiz();
   </script>
 </body>
 </html>

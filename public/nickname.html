@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pick a Nickname</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="glow"></div>
+  <header>
+    <h1>Choose your nickname</h1>
+    <p>You're almost in! We'll use this name on the leaderboard and when showing your answers.</p>
+  </header>
+
+  <main class="grid single">
+    <section class="card">
+      <p class="muted">Joining game code: <strong id="quiz-code-display">...</strong></p>
+      <form id="nickname-form">
+        <label>
+          Your nickname
+          <input type="text" id="player-name" placeholder="Alex" required />
+        </label>
+        <button type="submit">Join game</button>
+        <p id="nickname-error" class="error"></p>
+      </form>
+      <p class="muted">Entered the wrong code? <a href="/join.html">Go back</a>.</p>
+    </section>
+  </main>
+
+  <script>
+    const quizCodeDisplay = document.getElementById('quiz-code-display');
+    const nicknameForm = document.getElementById('nickname-form');
+    const playerName = document.getElementById('player-name');
+    const nicknameError = document.getElementById('nickname-error');
+
+    const quizCode = sessionStorage.getItem('quizCode');
+    if (!quizCode) {
+      window.location.href = '/join.html';
+    } else {
+      quizCodeDisplay.textContent = quizCode;
+    }
+
+    nicknameForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const name = playerName.value.trim();
+      if (!name) {
+        nicknameError.textContent = 'Please enter a nickname to continue.';
+        return;
+      }
+      sessionStorage.setItem('playerName', name);
+      window.location.href = '/play.html';
+    });
+  </script>
+</body>
+</html>
