@@ -16,12 +16,12 @@ const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 const QUIZ_ROOM_PREFIX = 'quiz-';
 
-const quizzes = new Map();
+const quizTemplates = new Map();
+const sessions = new Map();
 
 function serializeForStorage() {
-  return Array.from(quizzes.values()).map((quiz) => ({
+  return Array.from(quizTemplates.values()).map((quiz) => ({
     id: quiz.id,
-    hostKey: quiz.hostKey,
     title: quiz.title,
     questions: quiz.questions,
     questionDuration: quiz.questionDuration,
@@ -40,15 +40,7 @@ async function loadPersistedQuizzes() {
     const file = await fs.readFile(DATA_FILE, 'utf8');
     const stored = JSON.parse(file);
     stored.forEach((quiz) => {
-      quizzes.set(quiz.id, {
-        ...quiz,
-        hostId: null,
-        players: new Map(),
-        currentQuestionIndex: -1,
-        questionStart: null,
-        answers: new Set(),
-        questionActive: false,
-      });
+      quizTemplates.set(quiz.id, quiz);
     });
   } catch (error) {
     if (error.code !== 'ENOENT') {
@@ -71,23 +63,43 @@ function normalise(text = '') {
   return text.trim().toLowerCase();
 }
 
-function formatLeaderboard(quiz) {
-  return Array.from(quiz.players.values())
+function formatLeaderboard(session) {
+  return Array.from(session.players.values())
     .sort((a, b) => b.score - a.score)
     .map(({ name, score }) => ({ name, score }));
 }
 
-function emitLeaderboard(quizId) {
-  const quiz = quizzes.get(quizId);
-  if (!quiz) return;
-  const leaderboard = formatLeaderboard(quiz);
-  io.to(`${QUIZ_ROOM_PREFIX}${quizId}`).emit('leaderboard:update', leaderboard);
+function emitLeaderboard(sessionId) {
+  const session = sessions.get(sessionId);
+  if (!session) return;
+  const leaderboard = formatLeaderboard(session);
+  io.to(`${QUIZ_ROOM_PREFIX}${sessionId}`).emit('leaderboard:update', leaderboard);
 }
 
-function clearQuestionState(quiz) {
-  quiz.questionActive = false;
-  quiz.questionStart = null;
-  quiz.answers = new Set();
+function clearQuestionState(session) {
+  session.questionActive = false;
+  session.questionStart = null;
+  session.answers = new Set();
+}
+
+function createSessionFromTemplate(template, hostId = null) {
+  const sessionId = nanoid(6).toUpperCase();
+  const session = {
+    id: sessionId,
+    templateId: template.id,
+    hostId,
+    title: template.title,
+    players: new Map(),
+    questions: template.questions,
+    questionDuration: template.questionDuration,
+    currentQuestionIndex: -1,
+    questionStart: null,
+    answers: new Set(),
+    questionActive: false,
+    createdAt: Date.now(),
+  };
+  sessions.set(sessionId, session);
+  return session;
 }
 
 await loadPersistedQuizzes();
@@ -110,55 +122,65 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const quizId = nanoid(6).toUpperCase();
-    const hostKey = nanoid(10);
-    quizzes.set(quizId, {
-      id: quizId,
-      hostKey,
+    const templateId = nanoid(6).toUpperCase();
+    const template = {
+      id: templateId,
       title: title?.trim() || 'Classroom Quiz',
-      hostId: socket.id,
-      players: new Map(),
       questions: sanitizedQuestions,
       questionDuration: Number(questionDuration) || 20,
-      currentQuestionIndex: -1,
-      questionStart: null,
-      answers: new Set(),
-      questionActive: false,
       createdAt: Date.now(),
-    });
+    };
+    quizTemplates.set(templateId, template);
+
+    const session = createSessionFromTemplate(template);
 
     persistQuizzes().catch((error) => {
       /* eslint-disable no-console */
       console.error('Failed to save quiz to disk', error);
     });
 
-    socket.join(`${QUIZ_ROOM_PREFIX}${quizId}`);
-    socket.emit('host:quizCreated', { quizId, hostKey });
+    socket.join(`${QUIZ_ROOM_PREFIX}${session.id}`);
+    socket.emit('host:quizCreated', { quizId: session.id, templateId });
   });
 
-  socket.on('host:claimHost', ({ quizId, hostKey }) => {
-    const quiz = quizzes.get(quizId?.trim()?.toUpperCase());
-    if (!quiz || quiz.hostKey !== hostKey) {
-      socket.emit('host:error', 'Unable to find quiz with that code and host key.');
+  socket.on('host:claimHost', ({ quizId }) => {
+    const lookupId = quizId?.trim()?.toUpperCase();
+    if (!lookupId) {
+      socket.emit('host:error', 'Please enter a quiz code.');
       return;
     }
 
-    quiz.hostId = socket.id;
-    socket.join(`${QUIZ_ROOM_PREFIX}${quiz.id}`);
+    let session = sessions.get(lookupId);
+    if (!session) {
+      const template = quizTemplates.get(lookupId);
+      if (!template) {
+        socket.emit('host:error', 'Unable to find quiz with that code.');
+        return;
+      }
+      session = createSessionFromTemplate(template, socket.id);
+    }
+
+    if (session.hostId && session.hostId !== socket.id) {
+      socket.emit('host:error', 'Another host is already controlling this quiz.');
+      return;
+    }
+
+    session.hostId = socket.id;
+    socket.join(`${QUIZ_ROOM_PREFIX}${session.id}`);
     socket.emit('host:claimed', {
-      quizId: quiz.id,
-      title: quiz.title,
-      totalQuestions: quiz.questions.length,
-      questionDuration: quiz.questionDuration,
-      leaderboard: formatLeaderboard(quiz),
-      currentQuestionIndex: quiz.currentQuestionIndex,
-      questionActive: quiz.questionActive,
+      quizId: session.id,
+      title: session.title,
+      totalQuestions: session.questions.length,
+      questionDuration: session.questionDuration,
+      leaderboard: formatLeaderboard(session),
+      currentQuestionIndex: session.currentQuestionIndex,
+      questionActive: session.questionActive,
     });
   });
 
   socket.on('player:join', ({ quizId, name }) => {
-    const quiz = quizzes.get(quizId?.trim()?.toUpperCase());
-    if (!quiz) {
+    const session = sessions.get(quizId?.trim()?.toUpperCase());
+    if (!session) {
       socket.emit('player:error', 'Quiz not found. Double check the code.');
       return;
     }
@@ -169,58 +191,60 @@ io.on('connection', (socket) => {
       return;
     }
 
-    quiz.players.set(socket.id, {
+    session.players.set(socket.id, {
       id: socket.id,
       name: displayName,
       score: 0,
     });
 
-    socket.join(`${QUIZ_ROOM_PREFIX}${quiz.id}`);
+    socket.join(`${QUIZ_ROOM_PREFIX}${session.id}`);
     socket.emit('player:joined', {
-      quizId: quiz.id,
-      title: quiz.title,
-      totalQuestions: quiz.questions.length,
-      questionDuration: quiz.questionDuration,
+      quizId: session.id,
+      title: session.title,
+      totalQuestions: session.questions.length,
+      questionDuration: session.questionDuration,
     });
-    io.to(quiz.hostId).emit('host:playerJoined', formatLeaderboard(quiz));
-    emitLeaderboard(quiz.id);
+    if (session.hostId) {
+      io.to(session.hostId).emit('host:playerJoined', formatLeaderboard(session));
+    }
+    emitLeaderboard(session.id);
   });
 
   socket.on('host:startQuestion', ({ quizId }) => {
-    const quiz = quizzes.get(quizId?.trim()?.toUpperCase());
-    if (!quiz || quiz.hostId !== socket.id) return;
+    const session = sessions.get(quizId?.trim()?.toUpperCase());
+    if (!session || session.hostId !== socket.id) return;
 
-    const nextIndex = quiz.currentQuestionIndex + 1;
-    if (nextIndex >= quiz.questions.length) {
+    const nextIndex = session.currentQuestionIndex + 1;
+    if (nextIndex >= session.questions.length) {
       io.to(`${QUIZ_ROOM_PREFIX}${quizId}`).emit('quiz:finished');
       return;
     }
 
-    quiz.currentQuestionIndex = nextIndex;
-    quiz.questionStart = Date.now();
-    quiz.questionActive = true;
-    quiz.answers = new Set();
+    session.currentQuestionIndex = nextIndex;
+    session.questionStart = Date.now();
+    session.questionActive = true;
+    session.answers = new Set();
 
-    const currentQuestion = quiz.questions[nextIndex];
+    const currentQuestion = session.questions[nextIndex];
     io.to(`${QUIZ_ROOM_PREFIX}${quizId}`).emit('question:start', {
       prompt: currentQuestion.prompt,
       index: nextIndex + 1,
-      total: quiz.questions.length,
-      duration: quiz.questionDuration,
+      total: session.questions.length,
+      duration: session.questionDuration,
       media: currentQuestion.media,
     });
   });
 
   socket.on('player:answer', ({ quizId, answer }) => {
-    const quiz = quizzes.get(quizId?.trim()?.toUpperCase());
-    if (!quiz || !quiz.questionActive) return;
-    const player = quiz.players.get(socket.id);
-    if (!player || quiz.answers.has(socket.id)) return;
+    const session = sessions.get(quizId?.trim()?.toUpperCase());
+    if (!session || !session.questionActive) return;
+    const player = session.players.get(socket.id);
+    if (!player || session.answers.has(socket.id)) return;
 
     const submitted = answer ?? '';
-    const currentQuestion = quiz.questions[quiz.currentQuestionIndex];
-    const elapsedMs = Date.now() - quiz.questionStart;
-    const durationMs = quiz.questionDuration * 1000;
+    const currentQuestion = session.questions[session.currentQuestionIndex];
+    const elapsedMs = Date.now() - session.questionStart;
+    const durationMs = session.questionDuration * 1000;
     const timeRemaining = Math.max(0, durationMs - elapsedMs);
 
     const isCorrect = normalise(submitted) === normalise(currentQuestion.answer);
@@ -231,37 +255,37 @@ io.on('connection', (socket) => {
       player.score += earned;
     }
 
-    quiz.answers.add(socket.id);
+    session.answers.add(socket.id);
     socket.emit('player:answerResult', {
       correct: isCorrect,
       earned,
       correctAnswer: currentQuestion.answer,
     });
 
-    emitLeaderboard(quiz.id);
+    emitLeaderboard(session.id);
   });
 
   socket.on('host:endQuestion', ({ quizId }) => {
-    const quiz = quizzes.get(quizId?.trim()?.toUpperCase());
-    if (!quiz || quiz.hostId !== socket.id) return;
-    const currentQuestion = quiz.questions[quiz.currentQuestionIndex];
-    clearQuestionState(quiz);
+    const session = sessions.get(quizId?.trim()?.toUpperCase());
+    if (!session || session.hostId !== socket.id) return;
+    const currentQuestion = session.questions[session.currentQuestionIndex];
+    clearQuestionState(session);
     io.to(`${QUIZ_ROOM_PREFIX}${quizId}`).emit('question:end', {
       correctAnswer: currentQuestion?.answer,
     });
   });
 
   socket.on('disconnect', () => {
-    for (const [quizId, quiz] of quizzes) {
-      if (quiz.hostId === socket.id) {
-        io.to(`${QUIZ_ROOM_PREFIX}${quizId}`).emit('quiz:ended');
-        clearQuestionState(quiz);
-        quiz.hostId = null;
+    for (const [sessionId, session] of sessions) {
+      if (session.hostId === socket.id) {
+        io.to(`${QUIZ_ROOM_PREFIX}${sessionId}`).emit('quiz:ended');
+        clearQuestionState(session);
+        session.hostId = null;
         continue;
       }
-      if (quiz.players.has(socket.id)) {
-        quiz.players.delete(socket.id);
-        emitLeaderboard(quizId);
+      if (session.players.has(socket.id)) {
+        session.players.delete(socket.id);
+        emitLeaderboard(sessionId);
       }
     }
   });
@@ -274,7 +298,7 @@ app.get('/health', (_req, res) => {
 });
 
 app.get('/api/quizzes', (_req, res) => {
-  const payload = Array.from(quizzes.values())
+  const payload = Array.from(quizTemplates.values())
     .map((quiz) => ({
       id: quiz.id,
       title: quiz.title,

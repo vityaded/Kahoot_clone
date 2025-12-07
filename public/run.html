@@ -10,7 +10,7 @@
   <div class="glow"></div>
   <header>
     <h1>Run the game</h1>
-    <p>Enter the quiz code and host key to control questions, watch the leaderboard, and prompt players.</p>
+    <p>Enter a quiz code to control questions, watch the leaderboard, and prompt players. Every time you launch a quiz, a unique code is created.</p>
     <div class="cta-row">
       <a class="button ghost" href="/">Back to library</a>
       <a class="button ghost" href="/create.html">Create another quiz</a>
@@ -25,14 +25,11 @@
           Quiz code
           <input type="text" id="quiz-code" placeholder="ABC123" required />
         </label>
-        <label>
-          Host key
-          <input type="text" id="host-key" placeholder="From the Create page" required />
-        </label>
         <button type="submit">Connect as host</button>
         <p id="claim-error" class="error"></p>
       </form>
       <p id="quiz-meta" class="muted"></p>
+      <div id="session-code" class="code muted"></div>
     </section>
 
     <section class="card">
@@ -64,7 +61,6 @@
     const socket = io();
     const claimForm = document.getElementById('claim-form');
     const quizCodeInput = document.getElementById('quiz-code');
-    const hostKeyInput = document.getElementById('host-key');
     const claimError = document.getElementById('claim-error');
     const quizMeta = document.getElementById('quiz-meta');
     const playerCount = document.getElementById('player-count');
@@ -74,21 +70,19 @@
     const questionStatus = document.getElementById('question-status');
     const mediaPreview = document.getElementById('media-preview');
     const loopAudio = document.getElementById('loop-audio');
+    const sessionCode = document.getElementById('session-code');
 
     let quizId = null;
     let timerId = null;
 
-    function saveHostCredentials(id, key) {
+    function saveHostCredentials(id) {
       sessionStorage.setItem('quizId', id);
-      sessionStorage.setItem('hostKey', key);
     }
 
     function loadHostCredentials() {
       const params = new URLSearchParams(window.location.search);
       const storedQuizId = sessionStorage.getItem('quizId');
-      const storedHostKey = sessionStorage.getItem('hostKey');
       quizCodeInput.value = params.get('quizId') || storedQuizId || '';
-      hostKeyInput.value = params.get('hostKey') || storedHostKey || '';
     }
 
     function renderLeaderboard(players) {
@@ -116,13 +110,15 @@
     claimForm.addEventListener('submit', (event) => {
       event.preventDefault();
       claimError.textContent = '';
-      socket.emit('host:claimHost', { quizId: quizCodeInput.value, hostKey: hostKeyInput.value });
+      socket.emit('host:claimHost', { quizId: quizCodeInput.value });
     });
 
     socket.on('host:claimed', ({ quizId: id, title, totalQuestions, questionDuration, leaderboard }) => {
       quizId = id;
-      saveHostCredentials(id, hostKeyInput.value);
+      saveHostCredentials(id);
       quizMeta.textContent = `${title} · ${totalQuestions} question(s) · ${questionDuration}s each`;
+      sessionCode.textContent = `Player session code: ${id}`;
+      quizCodeInput.value = id;
       startQuestionBtn.disabled = false;
       endQuestionBtn.disabled = true;
       renderLeaderboard(leaderboard);
@@ -132,6 +128,7 @@
 
     socket.on('host:error', (message) => {
       claimError.textContent = message;
+      sessionCode.textContent = '';
     });
 
     socket.on('host:playerJoined', (players) => {

@@ -10,7 +10,7 @@
   <div class="glow"></div>
   <header>
     <h1>Design your quiz</h1>
-    <p>Write prompts, upload supporting media, and generate a quiz code plus host key for running the game.</p>
+    <p>Write prompts, upload supporting media, and generate a session code for running the game.</p>
     <div class="cta-row">
       <a class="button ghost" href="/">Back to library</a>
       <a class="button ghost" href="/run.html">Go to run page</a>
@@ -39,13 +39,14 @@
     <section class="card">
       <h2>Quiz code</h2>
       <div id="quiz-code" class="code">Waiting for quiz...</div>
-      <p class="muted">After creating you'll get a quiz code and a host key. Use both to run the game.</p>
+      <p class="muted">After creating you'll get a fresh session code to share with players. Each run gets its own code.</p>
       <div id="host-credentials" class="credentials hidden">
-        <p><strong>Quiz code:</strong> <span id="code-value"></span></p>
-        <p><strong>Host key:</strong> <span id="host-key"></span></p>
+        <p><strong>Session code:</strong> <span id="code-value"></span></p>
+        <p><strong>Template code:</strong> <span id="template-value"></span></p>
+        <p class="muted">Share the session code with players. Use the template code later to launch a brand-new session.</p>
         <div class="cta-row">
-          <button id="copy-code" type="button" class="ghost">Copy code</button>
-          <button id="copy-host-key" type="button" class="ghost">Copy host key</button>
+          <button id="copy-code" type="button" class="ghost">Copy session code</button>
+          <button id="copy-template" type="button" class="ghost">Copy template code</button>
           <a id="run-link" class="button" href="/run.html">Open run page</a>
         </div>
       </div>
@@ -62,10 +63,10 @@
     const formError = document.getElementById('form-error');
     const credentials = document.getElementById('host-credentials');
     const codeValue = document.getElementById('code-value');
-    const hostKeyValue = document.getElementById('host-key');
+    const templateValue = document.getElementById('template-value');
     const runLink = document.getElementById('run-link');
     const copyCodeBtn = document.getElementById('copy-code');
-    const copyHostKeyBtn = document.getElementById('copy-host-key');
+    const copyTemplateBtn = document.getElementById('copy-template');
 
     function renderQuestionRow(index, prompt = '', answer = '') {
       const wrapper = document.createElement('div');
@@ -165,14 +166,14 @@
       quizCodeEl.textContent = 'Waiting for quiz...';
     });
 
-    socket.on('host:quizCreated', ({ quizId, hostKey }) => {
-      quizCodeEl.textContent = `Share this code: ${quizId}`;
+    socket.on('host:quizCreated', ({ quizId, templateId }) => {
+      quizCodeEl.textContent = `Share this session code: ${quizId}`;
       credentials.classList.remove('hidden');
       codeValue.textContent = quizId;
-      hostKeyValue.textContent = hostKey;
-      runLink.href = `/run.html?quizId=${quizId}&hostKey=${hostKey}`;
+      templateValue.textContent = templateId;
+      runLink.href = `/run.html?quizId=${quizId}`;
       sessionStorage.setItem('quizId', quizId);
-      sessionStorage.setItem('hostKey', hostKey);
+      sessionStorage.setItem('templateId', templateId);
     });
 
     copyCodeBtn.addEventListener('click', () => {
@@ -182,11 +183,11 @@
       setTimeout(() => { copyCodeBtn.textContent = 'Copy code'; }, 1200);
     });
 
-    copyHostKeyBtn.addEventListener('click', () => {
-      if (!hostKeyValue.textContent) return;
-      navigator.clipboard.writeText(hostKeyValue.textContent);
-      copyHostKeyBtn.textContent = 'Copied!';
-      setTimeout(() => { copyHostKeyBtn.textContent = 'Copy host key'; }, 1200);
+    copyTemplateBtn.addEventListener('click', () => {
+      if (!templateValue.textContent) return;
+      navigator.clipboard.writeText(templateValue.textContent);
+      copyTemplateBtn.textContent = 'Copied!';
+      setTimeout(() => { copyTemplateBtn.textContent = 'Copy template code'; }, 1200);
     });
 
     renderQuestionRow(0);
