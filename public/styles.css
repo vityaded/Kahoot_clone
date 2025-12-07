@@ -181,6 +181,26 @@ button:disabled {
   box-shadow: none;
 }
 
+.control-row {
+  margin: 12px 0;
+}
+
+.inline-input {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.inline-input input {
+  margin: 0;
+}
+
+.inline-input button {
+  margin: 0;
+  width: auto;
+  white-space: nowrap;
+}
+
 .button.ghost,
 button.ghost {
   background: transparent;
@@ -486,4 +506,47 @@ body.player-view {
 
 .media-preview {
   margin-top: 12px;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 30;
+}
+
+.overlay.hidden {
+  display: none;
+}
+
+.overlay-card {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  width: min(520px, 90%);
+  max-height: 80vh;
+  padding: 20px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(6px);
+}
+
+.overlay-card ul {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+}
+
+.overlay-card li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  margin-bottom: 10px;
+  font-weight: 700;
 }

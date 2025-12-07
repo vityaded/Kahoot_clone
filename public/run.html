@@ -47,10 +47,30 @@
       <h2>Control room</h2>
       <div id="question-status" class="question-status">No question running.</div>
       <div id="media-preview" class="media-preview"></div>
+      <div class="control-row">
+        <label>
+          Seconds per question
+          <div class="inline-input">
+            <input type="number" id="duration-input" min="5" max="300" />
+            <button type="button" id="update-duration" class="ghost">Update</button>
+          </div>
+        </label>
+        <div id="countdown-banner" class="muted"></div>
+      </div>
       <button type="button" id="start-question" disabled>Start next question</button>
       <button type="button" id="end-question" class="ghost" disabled>End current question</button>
     </section>
   </main>
+
+  <div id="leaderboard-overlay" class="overlay hidden">
+    <div class="overlay-card">
+      <div class="leaderboard-header">
+        <h2>Leaderboard</h2>
+        <p id="overlay-hint" class="muted"></p>
+      </div>
+      <ul id="overlay-leaderboard"></ul>
+    </div>
+  </div>
 
   <audio id="loop-audio" loop>
     <source src="https://upload.wikimedia.org/wikipedia/commons/transcoded/0/07/Acoustic_Loop_-_EMF.wav/Acoustic_Loop_-_EMF.wav.mp3" type="audio/mpeg" />
@@ -71,9 +91,18 @@
     const mediaPreview = document.getElementById('media-preview');
     const loopAudio = document.getElementById('loop-audio');
     const sessionCode = document.getElementById('session-code');
+    const durationInput = document.getElementById('duration-input');
+    const updateDurationBtn = document.getElementById('update-duration');
+    const overlay = document.getElementById('leaderboard-overlay');
+    const overlayList = document.getElementById('overlay-leaderboard');
+    const overlayHint = document.getElementById('overlay-hint');
+    const countdownBanner = document.getElementById('countdown-banner');
 
     let quizId = null;
     let timerId = null;
+    let countdownId = null;
+    let quizTitle = '';
+    let totalQuestions = 0;
 
     function saveHostCredentials(id) {
       sessionStorage.setItem('quizId', id);
@@ -113,14 +142,17 @@
       socket.emit('host:claimHost', { quizId: quizCodeInput.value });
     });
 
-    socket.on('host:claimed', ({ quizId: id, title, totalQuestions, questionDuration, leaderboard }) => {
+    socket.on('host:claimed', ({ quizId: id, title, totalQuestions: total, questionDuration, leaderboard }) => {
       quizId = id;
+      quizTitle = title;
+      totalQuestions = total;
       saveHostCredentials(id);
-      quizMeta.textContent = `${title} · ${totalQuestions} question(s) · ${questionDuration}s each`;
+      updateMeta(questionDuration);
       sessionCode.textContent = `Player session code: ${id}`;
       quizCodeInput.value = id;
       startQuestionBtn.disabled = false;
       endQuestionBtn.disabled = true;
+      durationInput.value = questionDuration;
       renderLeaderboard(leaderboard);
       loopAudio.volume = 0.3;
       loopAudio.play().catch(() => {});
@@ -139,6 +171,11 @@
       renderLeaderboard(players);
     });
 
+    socket.on('quiz:durationChanged', ({ duration }) => {
+      durationInput.value = duration;
+      updateMeta(duration);
+    });
+
     startQuestionBtn.addEventListener('click', () => {
       if (!quizId) return;
       socket.emit('host:startQuestion', { quizId });
@@ -149,6 +186,18 @@
       socket.emit('host:endQuestion', { quizId });
     });
 
+    updateDurationBtn.addEventListener('click', () => {
+      if (!quizId) return;
+      socket.emit('host:updateDuration', { quizId, duration: durationInput.value });
+    });
+
+    socket.on('host:durationUpdated', ({ duration }) => {
+      durationInput.value = duration;
+      countdownBanner.textContent = `Updated: ${duration}s per question for upcoming rounds.`;
+      updateMeta(duration);
+      setTimeout(() => { countdownBanner.textContent = ''; }, 3000);
+    });
+
     socket.on('question:start', ({ prompt, index, total, duration, media }) => {
       questionStatus.textContent = `Question ${index}/${total}: ${prompt}`;
       startQuestionBtn.disabled = true;
@@ -157,15 +206,22 @@
       setTimeout(() => questionStatus.classList.remove('active'), 500);
       showMedia(media);
       countdown(duration);
+      hideOverlay();
+      stopCountdownBanner();
     });
 
     socket.on('question:end', ({ correctAnswer }) => {
       questionStatus.textContent = `Question ended. Correct answer: ${correctAnswer}`;
-      startQuestionBtn.disabled = false;
+      startQuestionBtn.disabled = true;
       endQuestionBtn.disabled = true;
       questionStatus.classList.remove('active');
       stopTimer();
       mediaPreview.innerHTML = '';
+    });
+
+    socket.on('leaderboard:show', ({ leaderboard, duration }) => {
+      startQuestionBtn.disabled = true;
+      renderOverlay(leaderboard, duration);
     });
 
     socket.on('quiz:finished', () => {
@@ -184,6 +240,10 @@
       mediaPreview.innerHTML = '';
     });
 
+    socket.on('quiz:countdown', ({ seconds }) => {
+      startLobbyCountdown(seconds);
+    });
+
     function countdown(seconds) {
       stopTimer();
       let remaining = seconds;
@@ -191,7 +251,7 @@
         if (remaining <= 0) {
           stopTimer();
           questionStatus.textContent = 'Time\'s up!';
-          startQuestionBtn.disabled = false;
+          startQuestionBtn.disabled = true;
           endQuestionBtn.disabled = true;
           mediaPreview.innerHTML = '';
           return;
@@ -206,6 +266,45 @@
         clearInterval(timerId);
         timerId = null;
       }
+    }
+
+    function updateMeta(duration) {
+      quizMeta.textContent = `${quizTitle} · ${totalQuestions} question(s) · ${duration}s each`;
+    }
+
+    function renderOverlay(players, duration) {
+      overlayList.innerHTML = '';
+      players.forEach((player, index) => {
+        const item = document.createElement('li');
+        item.innerHTML = `<span>${index + 1}. ${player.name}</span><span>${player.score} pts</span>`;
+        overlayList.appendChild(item);
+      });
+      overlay.classList.remove('hidden');
+      overlayHint.textContent = duration ? `Next question in ${duration}s` : 'Quiz finished';
+    }
+
+    function hideOverlay() {
+      overlay.classList.add('hidden');
+      overlayList.innerHTML = '';
+    }
+
+    function startLobbyCountdown(seconds) {
+      stopCountdownBanner();
+      let remaining = seconds;
+      countdownBanner.textContent = `Quiz starts automatically in ${remaining}s`;
+      countdownId = setInterval(() => {
+        remaining -= 1;
+        countdownBanner.textContent = `Quiz starts automatically in ${Math.max(remaining, 0)}s`;
+        if (remaining <= 0) stopCountdownBanner();
+      }, 1000);
+    }
+
+    function stopCountdownBanner() {
+      if (countdownId) {
+        clearInterval(countdownId);
+        countdownId = null;
+      }
+      countdownBanner.textContent = '';
     }
 
     loadHostCredentials();

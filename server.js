@@ -80,6 +80,14 @@ function clearQuestionState(session) {
   session.questionActive = false;
   session.questionStart = null;
   session.answers = new Set();
+  if (session.questionTimer) {
+    clearTimeout(session.questionTimer);
+    session.questionTimer = null;
+  }
+  if (session.leaderboardTimer) {
+    clearTimeout(session.leaderboardTimer);
+    session.leaderboardTimer = null;
+  }
 }
 
 function createSessionFromTemplate(template, hostId = null) {
@@ -97,9 +105,82 @@ function createSessionFromTemplate(template, hostId = null) {
     answers: new Set(),
     questionActive: false,
     createdAt: Date.now(),
+    questionTimer: null,
+    leaderboardTimer: null,
+    lobbyTimer: null,
+    lobbyExpiresAt: null,
   };
   sessions.set(sessionId, session);
   return session;
+}
+
+function scheduleLeaderboard(sessionId) {
+  const session = sessions.get(sessionId);
+  if (!session) return;
+  const leaderboard = formatLeaderboard(session);
+  const hasMoreQuestions = session.currentQuestionIndex + 1 < session.questions.length;
+  io.to(`${QUIZ_ROOM_PREFIX}${sessionId}`).emit('leaderboard:show', {
+    leaderboard,
+    duration: hasMoreQuestions ? 2 : null,
+  });
+
+  if (hasMoreQuestions) {
+    session.leaderboardTimer = setTimeout(() => startQuestion(sessionId), 2000);
+  } else {
+    session.leaderboardTimer = setTimeout(() => {
+      io.to(`${QUIZ_ROOM_PREFIX}${sessionId}`).emit('quiz:finished');
+    }, 2000);
+  }
+}
+
+function startQuestion(sessionId) {
+  const session = sessions.get(sessionId);
+  if (!session) return;
+
+  if (session.leaderboardTimer) {
+    clearTimeout(session.leaderboardTimer);
+    session.leaderboardTimer = null;
+  }
+
+  if (session.questionActive) return;
+
+  const nextIndex = session.currentQuestionIndex + 1;
+  if (nextIndex >= session.questions.length) {
+    io.to(`${QUIZ_ROOM_PREFIX}${sessionId}`).emit('quiz:finished');
+    return;
+  }
+
+  session.currentQuestionIndex = nextIndex;
+  session.questionStart = Date.now();
+  session.questionActive = true;
+  session.answers = new Set();
+  if (session.lobbyTimer) {
+    clearTimeout(session.lobbyTimer);
+    session.lobbyTimer = null;
+    session.lobbyExpiresAt = null;
+  }
+
+  const currentQuestion = session.questions[nextIndex];
+  io.to(`${QUIZ_ROOM_PREFIX}${sessionId}`).emit('question:start', {
+    prompt: currentQuestion.prompt,
+    index: nextIndex + 1,
+    total: session.questions.length,
+    duration: session.questionDuration,
+    media: currentQuestion.media,
+  });
+
+  session.questionTimer = setTimeout(() => endQuestion(sessionId), session.questionDuration * 1000);
+}
+
+function endQuestion(sessionId) {
+  const session = sessions.get(sessionId);
+  if (!session || !session.questionActive) return;
+  const currentQuestion = session.questions[session.currentQuestionIndex];
+  clearQuestionState(session);
+  io.to(`${QUIZ_ROOM_PREFIX}${sessionId}`).emit('question:end', {
+    correctAnswer: currentQuestion?.answer,
+  });
+  scheduleLeaderboard(sessionId);
 }
 
 await loadPersistedQuizzes();
@@ -176,6 +257,12 @@ io.on('connection', (socket) => {
       currentQuestionIndex: session.currentQuestionIndex,
       questionActive: session.questionActive,
     });
+    if (session.lobbyTimer && session.lobbyExpiresAt) {
+      const remainingMs = session.lobbyExpiresAt - Date.now();
+      if (remainingMs > 0) {
+        socket.emit('quiz:countdown', { seconds: Math.ceil(remainingMs / 1000) });
+      }
+    }
   });
 
   socket.on('player:join', ({ quizId, name }) => {
@@ -208,31 +295,24 @@ io.on('connection', (socket) => {
       io.to(session.hostId).emit('host:playerJoined', formatLeaderboard(session));
     }
     emitLeaderboard(session.id);
+
+    if (session.players.size === 1 && session.currentQuestionIndex === -1 && !session.lobbyTimer) {
+      session.lobbyExpiresAt = Date.now() + 15000;
+      session.lobbyTimer = setTimeout(() => startQuestion(session.id), 15000);
+      io.to(`${QUIZ_ROOM_PREFIX}${session.id}`).emit('quiz:countdown', { seconds: 15 });
+    } else if (session.lobbyTimer && session.lobbyExpiresAt) {
+      const remainingMs = session.lobbyExpiresAt - Date.now();
+      if (remainingMs > 0) {
+        socket.emit('quiz:countdown', { seconds: Math.ceil(remainingMs / 1000) });
+      }
+    }
   });
 
   socket.on('host:startQuestion', ({ quizId }) => {
     const session = sessions.get(quizId?.trim()?.toUpperCase());
     if (!session || session.hostId !== socket.id) return;
 
-    const nextIndex = session.currentQuestionIndex + 1;
-    if (nextIndex >= session.questions.length) {
-      io.to(`${QUIZ_ROOM_PREFIX}${quizId}`).emit('quiz:finished');
-      return;
-    }
-
-    session.currentQuestionIndex = nextIndex;
-    session.questionStart = Date.now();
-    session.questionActive = true;
-    session.answers = new Set();
-
-    const currentQuestion = session.questions[nextIndex];
-    io.to(`${QUIZ_ROOM_PREFIX}${quizId}`).emit('question:start', {
-      prompt: currentQuestion.prompt,
-      index: nextIndex + 1,
-      total: session.questions.length,
-      duration: session.questionDuration,
-      media: currentQuestion.media,
-    });
+    startQuestion(quizId);
   });
 
   socket.on('player:answer', ({ quizId, answer }) => {
@@ -268,11 +348,23 @@ io.on('connection', (socket) => {
   socket.on('host:endQuestion', ({ quizId }) => {
     const session = sessions.get(quizId?.trim()?.toUpperCase());
     if (!session || session.hostId !== socket.id) return;
-    const currentQuestion = session.questions[session.currentQuestionIndex];
-    clearQuestionState(session);
-    io.to(`${QUIZ_ROOM_PREFIX}${quizId}`).emit('question:end', {
-      correctAnswer: currentQuestion?.answer,
-    });
+
+    endQuestion(quizId);
+  });
+
+  socket.on('host:updateDuration', ({ quizId, duration }) => {
+    const session = sessions.get(quizId?.trim()?.toUpperCase());
+    if (!session || session.hostId !== socket.id) return;
+
+    const parsed = Number(duration);
+    if (!Number.isFinite(parsed) || parsed < 5 || parsed > 300) {
+      socket.emit('host:error', 'Please enter a duration between 5 and 300 seconds.');
+      return;
+    }
+
+    session.questionDuration = parsed;
+    socket.emit('host:durationUpdated', { duration: parsed });
+    io.to(`${QUIZ_ROOM_PREFIX}${quizId}`).emit('quiz:durationChanged', { duration: parsed });
   });
 
   socket.on('disconnect', () => {
@@ -280,6 +372,11 @@ io.on('connection', (socket) => {
       if (session.hostId === socket.id) {
         io.to(`${QUIZ_ROOM_PREFIX}${sessionId}`).emit('quiz:ended');
         clearQuestionState(session);
+        if (session.lobbyTimer) {
+          clearTimeout(session.lobbyTimer);
+          session.lobbyTimer = null;
+          session.lobbyExpiresAt = null;
+        }
         session.hostId = null;
         continue;
       }
