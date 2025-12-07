@@ -2,6 +2,11 @@ import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
 import { nanoid } from 'nanoid';
+import { promises as fs } from 'fs';
+import path from 'path';
+
+const DATA_DIR = path.join(process.cwd(), 'data');
+const DATA_FILE = path.join(DATA_DIR, 'quizzes.json');
 
 const app = express();
 const server = http.createServer(app);
@@ -12,6 +17,46 @@ const HOST = process.env.HOST || '0.0.0.0';
 const QUIZ_ROOM_PREFIX = 'quiz-';
 
 const quizzes = new Map();
+
+function serializeForStorage() {
+  return Array.from(quizzes.values()).map((quiz) => ({
+    id: quiz.id,
+    hostKey: quiz.hostKey,
+    title: quiz.title,
+    questions: quiz.questions,
+    questionDuration: quiz.questionDuration,
+    createdAt: quiz.createdAt,
+  }));
+}
+
+async function persistQuizzes() {
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  const payload = JSON.stringify(serializeForStorage());
+  await fs.writeFile(DATA_FILE, payload, 'utf8');
+}
+
+async function loadPersistedQuizzes() {
+  try {
+    const file = await fs.readFile(DATA_FILE, 'utf8');
+    const stored = JSON.parse(file);
+    stored.forEach((quiz) => {
+      quizzes.set(quiz.id, {
+        ...quiz,
+        hostId: null,
+        players: new Map(),
+        currentQuestionIndex: -1,
+        questionStart: null,
+        answers: new Set(),
+        questionActive: false,
+      });
+    });
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      /* eslint-disable no-console */
+      console.error('Failed to load quizzes from disk', error);
+    }
+  }
+}
 
 function buildMediaPayload(media) {
   if (!media || !media.src || !media.type) return null;
@@ -44,6 +89,8 @@ function clearQuestionState(quiz) {
   quiz.questionStart = null;
   quiz.answers = new Set();
 }
+
+await loadPersistedQuizzes();
 
 io.on('connection', (socket) => {
   socket.on('host:createQuiz', ({ title, questions, questionDuration }) => {
@@ -78,6 +125,11 @@ io.on('connection', (socket) => {
       answers: new Set(),
       questionActive: false,
       createdAt: Date.now(),
+    });
+
+    persistQuizzes().catch((error) => {
+      /* eslint-disable no-console */
+      console.error('Failed to save quiz to disk', error);
     });
 
     socket.join(`${QUIZ_ROOM_PREFIX}${quizId}`);
