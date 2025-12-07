@@ -47,8 +47,18 @@
     });
 
     const params = new URLSearchParams(window.location.search);
-    if (params.get('quizId')) {
-      quizCode.value = params.get('quizId');
+    const paramCode = params.get('quizId');
+    const autoJoin = params.get('autoJoin') === '1' || params.get('via') === 'qr';
+
+    if (paramCode) {
+      const upperCode = paramCode.trim().toUpperCase();
+      quizCode.value = upperCode;
+
+      if (autoJoin) {
+        sessionStorage.setItem('quizCode', upperCode);
+        sessionStorage.removeItem('playerName');
+        window.location.href = '/nickname.html';
+      }
     }
   </script>
 </body>

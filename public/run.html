@@ -30,6 +30,15 @@
       </form>
       <p id="quiz-meta" class="muted"></p>
       <div id="session-code" class="code muted"></div>
+
+      <div id="qr-section" class="qr-section hidden">
+        <p class="muted">Share this QR so players can jump straight to the nickname screen.</p>
+        <button type="button" class="qr-wrapper" id="qr-trigger">
+          <img id="qr-image" src="" alt="QR code to join the quiz" />
+          <span class="qr-hint">Tap to enlarge</span>
+        </button>
+        <p class="qr-link" id="qr-link"></p>
+      </div>
     </section>
 
     <section class="card">
@@ -72,6 +81,17 @@
     </div>
   </div>
 
+  <div id="qr-overlay" class="overlay hidden">
+    <div class="overlay-card qr-card">
+      <div class="leaderboard-header">
+        <h2>Scan to join</h2>
+        <p class="muted">This opens the nickname page with the code prefilled.</p>
+      </div>
+      <img id="qr-large" src="" alt="Large QR code" />
+      <p class="qr-overlay-link" id="qr-overlay-link"></p>
+    </div>
+  </div>
+
   <audio id="loop-audio" loop>
     <source src="https://upload.wikimedia.org/wikipedia/commons/transcoded/0/07/Acoustic_Loop_-_EMF.wav/Acoustic_Loop_-_EMF.wav.mp3" type="audio/mpeg" />
   </audio>
@@ -97,12 +117,41 @@
     const overlayList = document.getElementById('overlay-leaderboard');
     const overlayHint = document.getElementById('overlay-hint');
     const countdownBanner = document.getElementById('countdown-banner');
+    const qrSection = document.getElementById('qr-section');
+    const qrImage = document.getElementById('qr-image');
+    const qrLink = document.getElementById('qr-link');
+    const qrOverlay = document.getElementById('qr-overlay');
+    const qrLarge = document.getElementById('qr-large');
+    const qrOverlayLink = document.getElementById('qr-overlay-link');
+    const qrTrigger = document.getElementById('qr-trigger');
 
     let quizId = null;
     let timerId = null;
     let countdownId = null;
     let quizTitle = '';
     let totalQuestions = 0;
+
+    function buildJoinUrl(code) {
+      const url = new URL(window.location.origin + '/join.html');
+      url.searchParams.set('quizId', code);
+      url.searchParams.set('autoJoin', '1');
+      url.searchParams.set('via', 'qr');
+      return url.toString();
+    }
+
+    function updateQr(quizCode) {
+      const joinUrl = buildJoinUrl(quizCode);
+      const smallQr = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(joinUrl)}`;
+      const largeQr = `https://api.qrserver.com/v1/create-qr-code/?size=360x360&data=${encodeURIComponent(joinUrl)}`;
+
+      qrSection.classList.remove('hidden');
+      qrImage.src = smallQr;
+      qrImage.alt = `QR code for quiz ${quizCode}`;
+      qrImage.dataset.large = largeQr;
+      qrLink.textContent = joinUrl;
+      qrOverlayLink.textContent = joinUrl;
+      qrLarge.src = largeQr;
+    }
 
     function saveHostCredentials(id) {
       sessionStorage.setItem('quizId', id);
@@ -156,6 +205,7 @@
       renderLeaderboard(leaderboard);
       loopAudio.volume = 0.3;
       loopAudio.play().catch(() => {});
+      updateQr(id);
     });
 
     socket.on('host:error', (message) => {
@@ -306,6 +356,15 @@
       }
       countdownBanner.textContent = '';
     }
+
+    qrTrigger.addEventListener('click', () => {
+      if (!qrImage.dataset.large) return;
+      qrOverlay.classList.remove('hidden');
+    });
+
+    qrOverlay.addEventListener('click', () => {
+      qrOverlay.classList.add('hidden');
+    });
 
     loadHostCredentials();
   </script>
