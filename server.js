@@ -196,6 +196,9 @@ io.on('connection', (socket) => {
       .map((q) => ({
         prompt: q.prompt.trim(),
         answer: q.answer.trim(),
+        alternateAnswers: Array.isArray(q.alternateAnswers)
+          ? q.alternateAnswers.map((alt) => alt.trim()).filter(Boolean)
+          : [],
         media: buildMediaPayload(q.media),
       }));
     if (!sanitizedQuestions.length) {
@@ -327,7 +330,8 @@ io.on('connection', (socket) => {
     const durationMs = session.questionDuration * 1000;
     const timeRemaining = Math.max(0, durationMs - elapsedMs);
 
-    const isCorrect = normalise(submitted) === normalise(currentQuestion.answer);
+    const expectedAnswers = [currentQuestion.answer, ...(currentQuestion.alternateAnswers || [])];
+    const isCorrect = expectedAnswers.some((expected) => normalise(submitted) === normalise(expected));
     let earned = 0;
     if (isCorrect) {
       const speedBonus = Math.round((timeRemaining / durationMs) * 500);

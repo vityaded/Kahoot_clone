@@ -550,3 +550,35 @@ body.player-view {
   margin-bottom: 10px;
   font-weight: 700;
 }
+
+.bulk-card {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  padding: 14px;
+  border-radius: 12px;
+  margin: 12px 0;
+}
+
+.bulk-card textarea {
+  width: 100%;
+  margin: 8px 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  resize: vertical;
+}
+
+.preview-list {
+  margin-top: 6px;
+  display: grid;
+  gap: 6px;
+}
+
+.preview-item {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 10px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
