@@ -43,6 +43,16 @@
     </section>
   </main>
 
+  <div id="leaderboard-overlay" class="overlay hidden">
+    <div class="overlay-card">
+      <div class="leaderboard-header">
+        <h2>Leaderboard</h2>
+        <p id="overlay-hint" class="muted"></p>
+      </div>
+      <ul id="overlay-leaderboard"></ul>
+    </div>
+  </div>
+
   <script src="/socket.io/socket.io.js"></script>
   <script>
     const socket = io();
@@ -56,6 +66,9 @@
     const leaderboard = document.getElementById('leaderboard');
     const questionMedia = document.getElementById('question-media');
     const questionProgress = document.getElementById('question-progress');
+    const overlay = document.getElementById('leaderboard-overlay');
+    const overlayList = document.getElementById('overlay-leaderboard');
+    const overlayHint = document.getElementById('overlay-hint');
 
     const storedName = sessionStorage.getItem('playerName');
     const storedQuiz = sessionStorage.getItem('quizCode');
@@ -65,6 +78,7 @@
 
     let currentQuizId = null;
     let timerInterval = null;
+    let lobbyCountdown = null;
 
     function joinQuiz() {
       lobbyStatus.textContent = 'Joining game...';
@@ -96,6 +110,8 @@
       answerInput.focus();
       renderMedia(media);
       startTimer(duration);
+      hideOverlay();
+      stopLobbyCountdown();
     });
 
     socket.on('question:end', ({ correctAnswer }) => {
@@ -104,6 +120,10 @@
       answerForm.classList.add('hidden');
       questionMedia.innerHTML = '';
       timerEl.textContent = '--';
+    });
+
+    socket.on('leaderboard:show', ({ leaderboard: board, duration }) => {
+      renderOverlay(board, duration);
     });
 
     socket.on('quiz:finished', () => {
@@ -146,6 +166,10 @@
       });
     });
 
+    socket.on('quiz:countdown', ({ seconds }) => {
+      startLobbyCountdown(seconds);
+    });
+
     answerForm.addEventListener('submit', (event) => {
       event.preventDefault();
       if (!currentQuizId) return;
@@ -186,6 +210,42 @@
         questionMedia.innerHTML = `<audio controls src="${media.src}"></audio>`;
       } else if (media.type === 'video') {
         questionMedia.innerHTML = `<video controls src="${media.src}"></video>`;
+      }
+    }
+
+    function renderOverlay(players, duration) {
+      overlayList.innerHTML = '';
+      players.forEach((player, index) => {
+        const item = document.createElement('li');
+        item.innerHTML = `<span>${index + 1}. ${player.name}</span><span>${player.score} pts</span>`;
+        overlayList.appendChild(item);
+      });
+      overlayHint.textContent = duration ? `Next question in ${duration}s` : 'Quiz finished';
+      overlay.classList.remove('hidden');
+    }
+
+    function hideOverlay() {
+      overlay.classList.add('hidden');
+      overlayList.innerHTML = '';
+    }
+
+    function startLobbyCountdown(seconds) {
+      stopLobbyCountdown();
+      let remaining = seconds;
+      lobbyStatus.textContent = `Game starting in ${remaining}s...`;
+      lobbyCountdown = setInterval(() => {
+        remaining -= 1;
+        lobbyStatus.textContent = `Game starting in ${Math.max(remaining, 0)}s...`;
+        if (remaining <= 0) {
+          stopLobbyCountdown();
+        }
+      }, 1000);
+    }
+
+    function stopLobbyCountdown() {
+      if (lobbyCountdown) {
+        clearInterval(lobbyCountdown);
+        lobbyCountdown = null;
       }
     }
 
