@@ -31,6 +31,17 @@
         </label>
         <div class="questions" id="question-list"></div>
         <button type="button" class="ghost" id="add-question">+ Add question</button>
+        <div class="bulk-card">
+          <h3>Bulk add questions</h3>
+          <p class="muted">Paste one question per line using pipes: <code>Question | Answer | Other acceptable answers</code>.</p>
+          <textarea id="bulk-questions" rows="6" placeholder="What is the powerhouse of the cell? | Mitochondria | The mitochondrion"></textarea>
+          <div class="cta-row">
+            <button type="button" class="ghost" id="bulk-preview">Preview additions</button>
+            <button type="button" id="bulk-add">Add to quiz</button>
+          </div>
+          <p id="bulk-error" class="error"></p>
+          <div id="bulk-preview-list" class="preview-list"></div>
+        </div>
         <button type="submit">Create quiz</button>
         <p id="form-error" class="error"></p>
       </form>
@@ -68,7 +79,7 @@
     const copyCodeBtn = document.getElementById('copy-code');
     const copyTemplateBtn = document.getElementById('copy-template');
 
-    function renderQuestionRow(index, prompt = '', answer = '') {
+    function renderQuestionRow(index, prompt = '', answer = '', alternateAnswers = []) {
       const wrapper = document.createElement('div');
       wrapper.className = 'question-row media';
       wrapper.innerHTML = `
@@ -78,6 +89,9 @@
           </label>
           <label>Expected answer
             <input type="text" name="answer" placeholder="A process plants use to make food" value="${answer}" required />
+          </label>
+          <label>Alternate answers (separate with ||)
+            <input type="text" name="alternate" placeholder="Other phrasing that should count as correct (use || between options)" value="${alternateAnswers.join(' || ')}" />
           </label>
         </div>
         <div class="media-picker">
@@ -132,6 +146,11 @@
       for (const row of rows) {
         const prompt = row.querySelector('input[name="prompt"]').value;
         const answer = row.querySelector('input[name="answer"]').value;
+        const alternateRaw = row.querySelector('input[name="alternate"]').value;
+        const alternateAnswers = alternateRaw
+          .split(/\|\|/)
+          .map((part) => part.trim())
+          .filter(Boolean);
         const mediaInput = row.querySelector('input[name="media"]');
         const file = mediaInput?.files?.[0];
         let media = null;
@@ -143,10 +162,71 @@
           else if (file.type.startsWith('video/')) type = 'video';
           media = { type, name: file.name, src };
         }
-        questions.push({ prompt, answer, media });
+        questions.push({ prompt, answer, alternateAnswers, media });
       }
       return questions;
     }
+
+    function parseBulkQuestions(raw) {
+      const lines = raw
+        .split(/\n|\r/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+
+      const parsed = lines.map((line) => {
+        const parts = line.split(/\|/).map((part) => part.trim()).filter(Boolean);
+        const [prompt, answer, ...alternates] = parts;
+        return { prompt, answer, alternateAnswers: alternates };
+      });
+
+      return parsed.filter((q) => q.prompt && q.answer);
+    }
+
+    function renderBulkPreview(questions) {
+      const preview = document.getElementById('bulk-preview-list');
+      preview.innerHTML = '';
+      questions.forEach((q, idx) => {
+        const item = document.createElement('div');
+        item.className = 'preview-item';
+        const alternates = q.alternateAnswers.length ? ` | Variants: ${q.alternateAnswers.join(' || ')}` : '';
+        item.textContent = `${idx + 1}. ${q.prompt} → ${q.answer}${alternates}`;
+        preview.appendChild(item);
+      });
+    }
+
+    function appendBulkQuestions(questions) {
+      questions.forEach((q) => {
+        renderQuestionRow(questionList.children.length, q.prompt, q.answer, q.alternateAnswers);
+      });
+      updateQuestionLabels();
+    }
+
+    const bulkInput = document.getElementById('bulk-questions');
+    const bulkPreviewBtn = document.getElementById('bulk-preview');
+    const bulkAddBtn = document.getElementById('bulk-add');
+    const bulkError = document.getElementById('bulk-error');
+
+    bulkPreviewBtn.addEventListener('click', () => {
+      bulkError.textContent = '';
+      const parsed = parseBulkQuestions(bulkInput.value);
+      if (!parsed.length) {
+        bulkError.textContent = 'Enter at least one line with a question and answer separated by |';
+        return;
+      }
+      renderBulkPreview(parsed);
+    });
+
+    bulkAddBtn.addEventListener('click', () => {
+      bulkError.textContent = '';
+      const parsed = parseBulkQuestions(bulkInput.value);
+      if (!parsed.length) {
+        bulkError.textContent = 'Enter at least one line with a question and answer separated by |';
+        return;
+      }
+      appendBulkQuestions(parsed);
+      renderBulkPreview([]);
+      bulkInput.value = '';
+    });
 
     addQuestionBtn.addEventListener('click', () => renderQuestionRow(questionList.children.length));
 
