@@ -354,11 +354,15 @@
     }
 
     function showSubmission({ status, correctAnswer }) {
-      submissionCard.classList.remove('hidden');
       const hasAnswer = Boolean(lastSubmittedAnswer);
-      submissionAnswer.textContent = hasAnswer
-        ? `Your answer: ${lastSubmittedAnswer}`
-        : 'No answer submitted this round.';
+
+      if (!hasAnswer) {
+        submissionCard.classList.add('hidden');
+        return;
+      }
+
+      submissionCard.classList.remove('hidden');
+      submissionAnswer.textContent = `Your answer: ${lastSubmittedAnswer}`;
 
       if (status === 'pending') {
         submissionLabel.textContent = 'Submitted — waiting for result';
