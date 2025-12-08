@@ -562,18 +562,6 @@ body.player-view {
   box-shadow: 0 12px 30px var(--shadow);
 }
 
-.submission-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  border: 1px dashed rgba(255, 255, 255, 0.18);
-}
-
-.submitted-answer {
-  font-weight: 700;
-  word-break: break-word;
-}
-
 .leaderboard-card {
   height: 100%;
 }
@@ -654,7 +642,6 @@ body.player-view {
   }
 
   .answer-card,
-  .submission-card,
   .leaderboard-card {
     padding: 14px 16px;
   }
