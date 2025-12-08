@@ -15,6 +15,7 @@ const io = new Server(server);
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 const QUIZ_ROOM_PREFIX = 'quiz-';
+const DISCONNECT_GRACE_MS = 10000;
 
 const quizTemplates = new Map();
 const sessions = new Map();
@@ -112,6 +113,52 @@ function createSessionFromTemplate(template, hostId = null) {
   };
   sessions.set(sessionId, session);
   return session;
+}
+
+function findPlayerBySocket(session, socketId) {
+  for (const [playerId, player] of session.players) {
+    if (player.socketId === socketId) {
+      return { playerId, player };
+    }
+  }
+  return null;
+}
+
+function calculateTimeRemaining(session) {
+  if (!session.questionActive || !session.questionStart) return 0;
+  const durationMs = session.questionDuration * 1000;
+  const elapsedMs = Date.now() - session.questionStart;
+  return Math.max(0, Math.ceil((durationMs - elapsedMs) / 1000));
+}
+
+function emitPlayerState(socket, session, playerId = null) {
+  const currentQuestion = session.questions[session.currentQuestionIndex];
+  socket.emit('player:state', {
+    quizId: session.id,
+    title: session.title,
+    totalQuestions: session.questions.length,
+    questionDuration: session.questionDuration,
+    leaderboard: formatLeaderboard(session),
+    questionActive: session.questionActive,
+    question: session.questionActive
+      ? {
+          prompt: currentQuestion.prompt,
+          index: session.currentQuestionIndex + 1,
+          total: session.questions.length,
+          duration: session.questionDuration,
+          media: currentQuestion.media,
+        }
+      : null,
+    timeRemaining: calculateTimeRemaining(session),
+    hasAnswered: playerId ? session.answers.has(playerId) : false,
+  });
+
+  if (session.lobbyTimer && session.lobbyExpiresAt) {
+    const remainingMs = session.lobbyExpiresAt - Date.now();
+    if (remainingMs > 0) {
+      socket.emit('quiz:countdown', { seconds: Math.ceil(remainingMs / 1000) });
+    }
+  }
 }
 
 function scheduleLeaderboard(sessionId) {
@@ -268,7 +315,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('player:join', ({ quizId, name }) => {
+  socket.on('player:join', ({ quizId, name, playerId }) => {
     const session = sessions.get(quizId?.trim()?.toUpperCase());
     if (!session) {
       socket.emit('player:error', 'Quiz not found. Double check the code.');
@@ -281,11 +328,25 @@ io.on('connection', (socket) => {
       return;
     }
 
-    session.players.set(socket.id, {
-      id: socket.id,
-      name: displayName,
-      score: 0,
-    });
+    const existingPlayer = playerId ? session.players.get(playerId) : null;
+    const resolvedPlayerId = playerId || nanoid(10);
+
+    if (existingPlayer) {
+      if (existingPlayer.disconnectTimer) {
+        clearTimeout(existingPlayer.disconnectTimer);
+        existingPlayer.disconnectTimer = null;
+      }
+      existingPlayer.socketId = socket.id;
+      existingPlayer.name = displayName;
+    } else {
+      session.players.set(resolvedPlayerId, {
+        id: resolvedPlayerId,
+        socketId: socket.id,
+        name: displayName,
+        score: 0,
+        disconnectTimer: null,
+      });
+    }
 
     socket.join(`${QUIZ_ROOM_PREFIX}${session.id}`);
     socket.emit('player:joined', {
@@ -293,7 +354,10 @@ io.on('connection', (socket) => {
       title: session.title,
       totalQuestions: session.questions.length,
       questionDuration: session.questionDuration,
+      playerId: resolvedPlayerId,
     });
+    emitPlayerState(socket, session, resolvedPlayerId);
+
     if (session.hostId) {
       io.to(session.hostId).emit('host:playerJoined', formatLeaderboard(session));
     }
@@ -321,8 +385,9 @@ io.on('connection', (socket) => {
   socket.on('player:answer', ({ quizId, answer }) => {
     const session = sessions.get(quizId?.trim()?.toUpperCase());
     if (!session || !session.questionActive) return;
-    const player = session.players.get(socket.id);
-    if (!player || session.answers.has(socket.id)) return;
+    const found = findPlayerBySocket(session, socket.id);
+    const player = found?.player;
+    if (!player || session.answers.has(player.id)) return;
 
     const submitted = answer ?? '';
     const currentQuestion = session.questions[session.currentQuestionIndex];
@@ -339,7 +404,7 @@ io.on('connection', (socket) => {
       player.score += earned;
     }
 
-    session.answers.add(socket.id);
+    session.answers.add(player.id);
     socket.emit('player:answerResult', {
       correct: isCorrect,
       earned,
@@ -384,9 +449,18 @@ io.on('connection', (socket) => {
         session.hostId = null;
         continue;
       }
-      if (session.players.has(socket.id)) {
-        session.players.delete(socket.id);
-        emitLeaderboard(sessionId);
+
+      const found = findPlayerBySocket(session, socket.id);
+      if (found?.player) {
+        const player = found.player;
+        if (player.disconnectTimer) {
+          clearTimeout(player.disconnectTimer);
+        }
+        player.disconnectTimer = setTimeout(() => {
+          session.players.delete(found.playerId);
+          emitLeaderboard(sessionId);
+          player.disconnectTimer = null;
+        }, DISCONNECT_GRACE_MS);
       }
     }
   });

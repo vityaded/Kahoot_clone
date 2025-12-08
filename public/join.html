@@ -43,6 +43,7 @@
       }
       sessionStorage.setItem('quizCode', code);
       sessionStorage.removeItem('playerName');
+      sessionStorage.removeItem('playerId');
       window.location.href = '/nickname.html';
     });
 
@@ -57,6 +58,7 @@
       if (autoJoin) {
         sessionStorage.setItem('quizCode', upperCode);
         sessionStorage.removeItem('playerName');
+        sessionStorage.removeItem('playerId');
         window.location.href = '/nickname.html';
       }
     }

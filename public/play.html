@@ -72,6 +72,7 @@
 
     const storedName = sessionStorage.getItem('playerName');
     const storedQuiz = sessionStorage.getItem('quizCode');
+    let storedPlayerId = sessionStorage.getItem('playerId');
     if (!storedName || !storedQuiz) {
       window.location.href = '/join.html';
     }
@@ -79,17 +80,36 @@
     let currentQuizId = null;
     let timerInterval = null;
     let lobbyCountdown = null;
+    let hasJoinedOnce = Boolean(storedPlayerId);
 
-    function joinQuiz() {
-      lobbyStatus.textContent = 'Joining game...';
+    function joinQuiz(message = 'Joining game...') {
+      lobbyStatus.textContent = message;
       socket.emit('player:join', {
         quizId: storedQuiz,
         name: storedName,
+        playerId: storedPlayerId,
       });
     }
 
-    socket.on('player:joined', ({ quizId, title, totalQuestions }) => {
+    socket.on('connect', () => {
+      if (hasJoinedOnce) {
+        joinQuiz('Reconnecting to the game...');
+      }
+    });
+
+    socket.on('reconnect', () => {
+      if (hasJoinedOnce) {
+        joinQuiz('Reconnecting to the game...');
+      }
+    });
+
+    socket.on('player:joined', ({ quizId, title, totalQuestions, playerId }) => {
       currentQuizId = quizId;
+      if (playerId) {
+        storedPlayerId = playerId;
+        sessionStorage.setItem('playerId', playerId);
+        hasJoinedOnce = true;
+      }
       joinError.textContent = '';
       lobbyStatus.textContent = `Joined "${title}". Waiting for the first question...`;
       answerFeedback.textContent = '';
@@ -158,12 +178,41 @@
     });
 
     socket.on('leaderboard:update', (players) => {
-      leaderboard.innerHTML = '';
-      players.forEach((player, index) => {
-        const li = document.createElement('li');
-        li.innerHTML = `<span>${index + 1}. ${player.name}</span><span>${player.score} pts</span>`;
-        leaderboard.appendChild(li);
-      });
+      renderLeaderboard(players);
+    });
+
+    socket.on('player:state', ({ questionActive, question, timeRemaining, leaderboard: board, hasAnswered }) => {
+      renderLeaderboard(board);
+
+      if (questionActive && question) {
+        questionProgress.textContent = `Question ${question.index} of ${question.total}`;
+        questionText.textContent = question.prompt;
+        renderMedia(question.media);
+        hideOverlay();
+        stopLobbyCountdown();
+        if (hasAnswered) {
+          answerForm.classList.add('hidden');
+          answerFeedback.textContent = 'Answer received!';
+          answerFeedback.className = 'success';
+        } else {
+          answerForm.classList.remove('hidden');
+          answerInput.value = '';
+          answerInput.focus();
+          answerFeedback.textContent = '';
+          answerFeedback.className = '';
+        }
+        const remaining = timeRemaining ?? question.duration;
+        startTimer(remaining);
+      } else {
+        stopTimer();
+        timerEl.textContent = '--';
+        questionProgress.textContent = 'Waiting for host...';
+        questionText.textContent = 'Waiting for the host to start...';
+        answerForm.classList.add('hidden');
+        answerFeedback.textContent = '';
+        answerFeedback.className = '';
+        questionMedia.innerHTML = '';
+      }
     });
 
     socket.on('quiz:countdown', ({ seconds }) => {
@@ -181,7 +230,11 @@
 
     function startTimer(seconds) {
       stopTimer();
-      let remaining = seconds;
+      let remaining = Math.round(seconds);
+      if (!Number.isFinite(remaining) || remaining <= 0) {
+        timerEl.textContent = 'Time!';
+        return;
+      }
       timerEl.textContent = `${remaining}s`;
       timerInterval = setInterval(() => {
         remaining -= 1;
@@ -199,6 +252,16 @@
         clearInterval(timerInterval);
         timerInterval = null;
       }
+    }
+
+    function renderLeaderboard(players) {
+      leaderboard.innerHTML = '';
+      if (!Array.isArray(players)) return;
+      players.forEach((player, index) => {
+        const li = document.createElement('li');
+        li.innerHTML = `<span>${index + 1}. ${player.name}</span><span>${player.score} pts</span>`;
+        leaderboard.appendChild(li);
+      });
     }
 
     function renderMedia(media) {
