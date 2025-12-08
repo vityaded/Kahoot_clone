@@ -76,19 +76,35 @@
     const overlayList = document.getElementById('overlay-leaderboard');
     const overlayHint = document.getElementById('overlay-hint');
 
-    const storedName = sessionStorage.getItem('playerName');
-    const storedQuiz = sessionStorage.getItem('quizCode');
-    let storedPlayerId = sessionStorage.getItem('playerId');
-    if (!storedName || !storedQuiz) {
-      window.location.href = '/join.html';
+    const playerIdFromStorage = localStorage.getItem('playerId');
+    let storedPlayerId = playerIdFromStorage;
+    let storedQuiz = localStorage.getItem('quizCode');
+    let storedName = localStorage.getItem('playerName');
+
+    function generatePlayerId() {
+      if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+      return Math.random().toString(36).slice(2, 12);
+    }
+
+    if (!storedPlayerId) {
+      storedPlayerId = generatePlayerId();
+      localStorage.setItem('playerId', storedPlayerId);
     }
 
     let currentQuizId = null;
     let timerInterval = null;
     let lobbyCountdown = null;
-    let hasJoinedOnce = Boolean(storedPlayerId);
+    let hasJoinedOnce = Boolean(playerIdFromStorage);
 
     function joinQuiz(message = 'Joining game...') {
+      storedName = localStorage.getItem('playerName');
+      storedQuiz = localStorage.getItem('quizCode');
+
+      if (!storedName || !storedQuiz) {
+        window.location.href = '/join.html';
+        return;
+      }
+
       lobbyStatus.textContent = message;
       socket.emit('player:join', {
         quizId: storedQuiz,
@@ -97,28 +113,54 @@
       });
     }
 
+    function attemptReconnect() {
+      lobbyStatus.textContent = 'Reconnecting to the game...';
+      socket.emit('player:reconnect', { playerId: storedPlayerId, quizId: storedQuiz });
+    }
+
     socket.on('connect', () => {
-      if (hasJoinedOnce) {
-        joinQuiz('Reconnecting to the game...');
-      }
+      attemptReconnect();
     });
 
     socket.on('reconnect', () => {
-      if (hasJoinedOnce) {
-        joinQuiz('Reconnecting to the game...');
-      }
+      attemptReconnect();
     });
 
     socket.on('player:joined', ({ quizId, title, totalQuestions, playerId }) => {
       currentQuizId = quizId;
       if (playerId) {
         storedPlayerId = playerId;
-        sessionStorage.setItem('playerId', playerId);
+        localStorage.setItem('playerId', playerId);
         hasJoinedOnce = true;
+      }
+      if (quizId) {
+        storedQuiz = quizId;
+        localStorage.setItem('quizCode', quizId);
       }
       joinError.textContent = '';
       lobbyStatus.textContent = `Joined "${title}". Waiting for the first question...`;
       answerFeedback.textContent = '';
+    });
+
+    socket.on('player:reconnected', ({ quizId, title, playerId, name }) => {
+      currentQuizId = quizId;
+      joinError.textContent = '';
+      lobbyStatus.textContent = `Reconnected to "${title}". Restoring your spot...`;
+      storedPlayerId = playerId;
+      storedName = name || storedName;
+      storedQuiz = quizId;
+      localStorage.setItem('playerId', storedPlayerId);
+      if (storedName) localStorage.setItem('playerName', storedName);
+      if (storedQuiz) localStorage.setItem('quizCode', storedQuiz);
+      hasJoinedOnce = true;
+    });
+
+    socket.on('player:reconnectFailed', () => {
+      if (storedName && storedQuiz) {
+        joinQuiz('Rejoining game...');
+      } else {
+        window.location.href = '/join.html';
+      }
     });
 
     socket.on('player:error', (message) => {
@@ -330,7 +372,6 @@
       }
     }
 
-    joinQuiz();
   </script>
 </body>
 </html>

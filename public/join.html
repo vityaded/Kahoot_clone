@@ -41,9 +41,8 @@
         joinError.textContent = 'Enter the game code your host is showing.';
         return;
       }
-      sessionStorage.setItem('quizCode', code);
-      sessionStorage.removeItem('playerName');
-      sessionStorage.removeItem('playerId');
+      localStorage.setItem('quizCode', code);
+      localStorage.removeItem('playerName');
       window.location.href = '/nickname.html';
     });
 
@@ -56,9 +55,8 @@
       quizCode.value = upperCode;
 
       if (autoJoin) {
-        sessionStorage.setItem('quizCode', upperCode);
-        sessionStorage.removeItem('playerName');
-        sessionStorage.removeItem('playerId');
+        localStorage.setItem('quizCode', upperCode);
+        localStorage.removeItem('playerName');
         window.location.href = '/nickname.html';
       }
     }
