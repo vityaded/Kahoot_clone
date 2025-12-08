@@ -29,6 +29,10 @@
           <input type="text" id="answer-input" autocomplete="off" />
         </label>
         <button type="submit">Submit answer</button>
+        <div id="answer-waiting" class="waiting-state hidden" role="status" aria-live="polite">
+          <span class="spinner" aria-hidden="true"></span>
+          <span>Answer submitted—waiting for results</span>
+        </div>
         <p class="muted">We'll lock it in right away, so double check before sending.</p>
       </form>
 
@@ -62,6 +66,8 @@
     const timerEl = document.getElementById('timer');
     const answerForm = document.getElementById('answer-form');
     const answerInput = document.getElementById('answer-input');
+    const submitButton = answerForm.querySelector('button');
+    const answerWaiting = document.getElementById('answer-waiting');
     const answerFeedback = document.getElementById('answer-feedback');
     const leaderboard = document.getElementById('leaderboard');
     const questionMedia = document.getElementById('question-media');
@@ -126,6 +132,7 @@
       answerFeedback.textContent = '';
       answerFeedback.className = '';
       answerForm.classList.remove('hidden');
+      setAnswerWaiting(false);
       answerInput.value = '';
       answerInput.focus();
       renderMedia(media);
@@ -138,6 +145,7 @@
       stopTimer();
       questionText.textContent = `Time's up! Correct answer: ${correctAnswer}`;
       answerForm.classList.add('hidden');
+      setAnswerWaiting(false);
       questionMedia.innerHTML = '';
       timerEl.textContent = '--';
     });
@@ -151,6 +159,7 @@
       questionProgress.textContent = 'Quiz finished';
       questionText.textContent = 'Quiz finished! Check the leaderboard for final scores.';
       answerForm.classList.add('hidden');
+      setAnswerWaiting(false);
       questionMedia.innerHTML = '';
       timerEl.textContent = '--';
     });
@@ -160,6 +169,7 @@
       questionProgress.textContent = 'Quiz closed';
       questionText.textContent = 'The host left the game. Quiz closed.';
       answerForm.classList.add('hidden');
+      setAnswerWaiting(false);
       questionMedia.innerHTML = '';
       timerEl.textContent = '--';
     });
@@ -173,6 +183,7 @@
         answerFeedback.className = 'error';
       }
       answerForm.classList.add('hidden');
+      setAnswerWaiting(false);
       stopTimer();
       questionMedia.innerHTML = '';
     });
@@ -222,11 +233,18 @@
     answerForm.addEventListener('submit', (event) => {
       event.preventDefault();
       if (!currentQuizId) return;
+      setAnswerWaiting(true);
       socket.emit('player:answer', {
         quizId: currentQuizId,
         answer: answerInput.value,
       });
     });
+
+    function setAnswerWaiting(isWaiting) {
+      answerInput.disabled = isWaiting;
+      submitButton.disabled = isWaiting;
+      answerWaiting.classList.toggle('hidden', !isWaiting);
+    }
 
     function startTimer(seconds) {
       stopTimer();
