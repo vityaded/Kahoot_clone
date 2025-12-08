@@ -43,6 +43,7 @@
       }
       sessionStorage.setItem('quizCode', code);
       sessionStorage.removeItem('playerName');
+      localStorage.setItem('lastQuizCode', code);
       window.location.href = '/nickname.html';
     });
 
