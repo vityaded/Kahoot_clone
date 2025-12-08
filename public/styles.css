@@ -591,6 +591,18 @@ body.player-view {
   box-shadow: 0 12px 30px var(--shadow);
 }
 
+.submission-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+}
+
+.submitted-answer {
+  font-weight: 700;
+  word-break: break-word;
+}
+
 .leaderboard-card {
   height: 100%;
 }
@@ -640,6 +652,51 @@ body.player-view {
   border-radius: 12px;
   margin-bottom: 10px;
   font-weight: 700;
+}
+
+@media (max-width: 700px) {
+  body.player-view {
+    padding: 0;
+  }
+
+  .player-container {
+    padding: 16px 14px 32px;
+    gap: 12px;
+  }
+
+  .question-board {
+    padding: 22px 14px 28px;
+    min-height: 320px;
+  }
+
+  .question-content h1 {
+    font-size: clamp(1.4rem, 5vw, 2.1rem);
+  }
+
+  .corner-badge {
+    padding: 8px 12px;
+    font-size: 0.85rem;
+  }
+
+  .response-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .answer-card,
+  .submission-card,
+  .leaderboard-card {
+    padding: 14px 16px;
+  }
+
+  .leaderboard-card ul li {
+    font-size: 0.95rem;
+  }
+
+  button,
+  .button {
+    font-size: 1rem;
+    padding: 14px 16px;
+  }
 }
 
 .bulk-card {
