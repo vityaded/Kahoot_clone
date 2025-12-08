@@ -34,7 +34,7 @@
     const playerName = document.getElementById('player-name');
     const nicknameError = document.getElementById('nickname-error');
 
-    const quizCode = sessionStorage.getItem('quizCode');
+    const quizCode = localStorage.getItem('quizCode');
     if (!quizCode) {
       window.location.href = '/join.html';
     } else {
@@ -48,7 +48,7 @@
         nicknameError.textContent = 'Please enter a nickname to continue.';
         return;
       }
-      sessionStorage.setItem('playerName', name);
+      localStorage.setItem('playerName', name);
       window.location.href = '/play.html';
     });
   </script>

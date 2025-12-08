@@ -19,6 +19,7 @@ const DISCONNECT_GRACE_MS = 10000;
 
 const quizTemplates = new Map();
 const sessions = new Map();
+const playerSessions = new Map();
 
 function serializeForStorage() {
   return Array.from(quizTemplates.values()).map((quiz) => ({
@@ -129,6 +130,16 @@ function calculateTimeRemaining(session) {
   const durationMs = session.questionDuration * 1000;
   const elapsedMs = Date.now() - session.questionStart;
   return Math.max(0, Math.ceil((durationMs - elapsedMs) / 1000));
+}
+
+function findPlayerSession(playerId, quizId = null) {
+  const targetSessionId = quizId?.trim()?.toUpperCase() || playerSessions.get(playerId);
+  if (!targetSessionId) return null;
+  const session = sessions.get(targetSessionId);
+  if (!session) return null;
+  const player = session.players.get(playerId);
+  if (!player) return null;
+  return { sessionId: targetSessionId, session, player };
 }
 
 function emitPlayerState(socket, session, playerId = null) {
@@ -328,8 +339,14 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const existingPlayer = playerId ? session.players.get(playerId) : null;
     const resolvedPlayerId = playerId || nanoid(10);
+    const existingPlayer = session.players.get(resolvedPlayerId);
+
+    const previousSessionId = playerSessions.get(resolvedPlayerId);
+    if (previousSessionId && previousSessionId !== session.id) {
+      const previousSession = sessions.get(previousSessionId);
+      previousSession?.players.delete(resolvedPlayerId);
+    }
 
     if (existingPlayer) {
       if (existingPlayer.disconnectTimer) {
@@ -347,6 +364,8 @@ io.on('connection', (socket) => {
         disconnectTimer: null,
       });
     }
+
+    playerSessions.set(resolvedPlayerId, session.id);
 
     socket.join(`${QUIZ_ROOM_PREFIX}${session.id}`);
     socket.emit('player:joined', {
@@ -380,6 +399,37 @@ io.on('connection', (socket) => {
     if (!session || session.hostId !== socket.id) return;
 
     startQuestion(quizId);
+  });
+
+  socket.on('player:reconnect', ({ playerId, quizId }) => {
+    const found = findPlayerSession(playerId, quizId);
+    if (!found) {
+      socket.emit('player:reconnectFailed');
+      return;
+    }
+
+    const { session, sessionId, player } = found;
+    if (player.disconnectTimer) {
+      clearTimeout(player.disconnectTimer);
+      player.disconnectTimer = null;
+    }
+    player.socketId = socket.id;
+    playerSessions.set(playerId, sessionId);
+
+    socket.join(`${QUIZ_ROOM_PREFIX}${sessionId}`);
+    socket.emit('player:reconnected', {
+      quizId: sessionId,
+      title: session.title,
+      playerId,
+      name: player.name,
+      totalQuestions: session.questions.length,
+      questionDuration: session.questionDuration,
+    });
+
+    emitPlayerState(socket, session, playerId);
+    if (session.hostId) {
+      io.to(session.hostId).emit('host:playerJoined', formatLeaderboard(session));
+    }
   });
 
   socket.on('player:answer', ({ quizId, answer }) => {
@@ -458,6 +508,7 @@ io.on('connection', (socket) => {
         }
         player.disconnectTimer = setTimeout(() => {
           session.players.delete(found.playerId);
+          playerSessions.delete(found.playerId);
           emitLeaderboard(sessionId);
           player.disconnectTimer = null;
         }, DISCONNECT_GRACE_MS);
