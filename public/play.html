@@ -8,6 +8,7 @@
 </head>
 <body class="player-view">
   <div class="glow"></div>
+  <div id="flash-overlay" class="flash-overlay"></div>
   <main class="player-container">
     <div class="player-status" id="lobby-status">Connecting to the game...</div>
     <p id="join-error" class="error"></p>
@@ -18,6 +19,7 @@
       <div class="question-content">
         <p class="eyebrow">Question</p>
         <h1 id="question-text">Waiting for the host to start...</h1>
+        <div id="correct-answer-display" class="correct-answer" aria-live="polite"></div>
         <div class="media-preview" id="question-media"></div>
       </div>
     </section>
@@ -70,6 +72,8 @@
     const overlayList = document.getElementById('overlay-leaderboard');
     const overlayHint = document.getElementById('overlay-hint');
     const leaderboardCard = document.getElementById('leaderboard-card');
+    const correctAnswerDisplay = document.getElementById('correct-answer-display');
+    const flashOverlay = document.getElementById('flash-overlay');
 
     const playerIdFromStorage = localStorage.getItem('playerId');
     let storedPlayerId = playerIdFromStorage;
@@ -168,6 +172,7 @@
       questionText.textContent = prompt;
       answerFeedback.textContent = '';
       answerFeedback.className = '';
+      showCorrectAnswer('');
       lobbyStatus.textContent = '';
       answerForm.classList.remove('hidden');
       setAnswerWaiting(false);
@@ -183,6 +188,7 @@
     socket.on('question:end', ({ correctAnswer }) => {
       stopTimer();
       questionText.textContent = `Time's up! Correct answer: ${correctAnswer}`;
+      showCorrectAnswer(`Correct answer: ${correctAnswer}`);
       answerForm.classList.add('hidden');
       setAnswerWaiting(false);
       questionMedia.innerHTML = '';
@@ -221,9 +227,11 @@
         answerFeedback.textContent = `Correct! +${earned} points`;
         answerFeedback.className = 'success';
       } else {
-        answerFeedback.textContent = `Not quite. Correct answer: ${correctAnswer}`;
+        answerFeedback.textContent = 'Incorrect';
         answerFeedback.className = 'error';
       }
+      showCorrectAnswer(`Correct answer: ${correctAnswer}`);
+      triggerFlash(correct);
       answerForm.classList.add('hidden');
       setAnswerWaiting(false);
     });
@@ -266,6 +274,7 @@
         setAnswerWaiting(false);
         answerFeedback.textContent = '';
         answerFeedback.className = '';
+        showCorrectAnswer('');
         questionMedia.innerHTML = '';
         toggleLeaderboard(true);
       }
@@ -289,9 +298,22 @@
       answerFeedback.className = 'muted';
     });
 
+    function showCorrectAnswer(text) {
+      correctAnswerDisplay.textContent = text;
+      correctAnswerDisplay.classList.toggle('visible', Boolean(text));
+    }
+
     function setAnswerWaiting(isWaiting) {
       answerInput.disabled = isWaiting;
       submitButton.disabled = isWaiting;
+    }
+
+    function triggerFlash(isCorrect) {
+      const variant = isCorrect ? 'flash-success' : 'flash-error';
+      flashOverlay.className = `flash-overlay ${variant} active`;
+      setTimeout(() => {
+        flashOverlay.className = 'flash-overlay';
+      }, 650);
     }
 
     function startTimer(seconds) {
