@@ -620,7 +620,7 @@ body.player-view.input-engaged .player-container {
 }
 
 body.player-view.input-engaged .question-board {
-  align-items: flex-start;
+  align-items: center;
   min-height: 320px;
 }
 
