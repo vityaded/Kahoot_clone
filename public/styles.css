@@ -607,7 +607,7 @@ body.player-view {
 
 .question-content {
   max-width: 900px;
-  transition: transform 220ms ease;
+  transition: transform 220ms ease, height 220ms ease;
 }
 
 .question-board.question-shifted .question-content {
