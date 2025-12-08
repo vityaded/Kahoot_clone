@@ -63,6 +63,7 @@
     const lobbyStatus = document.getElementById('lobby-status');
     const joinError = document.getElementById('join-error');
     const questionText = document.getElementById('question-text');
+    const questionContent = document.querySelector('.question-content');
     const timerEl = document.getElementById('timer');
     const answerForm = document.getElementById('answer-form');
     const answerInput = document.getElementById('answer-input');
@@ -412,8 +413,8 @@
     }
 
     function adjustQuestionPosition() {
-      if (!questionBoard || !questionText || !answerInput) return;
-      const questionRect = questionText.getBoundingClientRect();
+      if (!questionBoard || !questionContent || !answerInput) return;
+      const questionRect = questionContent.getBoundingClientRect();
       const inputRect = answerInput.getBoundingClientRect();
       const desiredGap = 12;
       const rawShift = inputRect.top - questionRect.bottom - desiredGap;
