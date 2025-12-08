@@ -102,6 +102,7 @@
     let hasJoinedOnce = Boolean(playerIdFromStorage);
     let resultOverlayTimeout = null;
     let inputEngaged = false;
+    let baseViewportHeight = window.visualViewport?.height || window.innerHeight;
 
     function joinQuiz(message = 'Joining game...') {
       storedName = localStorage.getItem('playerName');
@@ -312,10 +313,28 @@
 
     answerInput.addEventListener('focus', handleInputFocus);
     answerInput.addEventListener('blur', handleInputBlur);
+
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', () => {
+        if (!inputEngaged) {
+          baseViewportHeight = Math.max(baseViewportHeight, window.visualViewport.height);
+          return;
+        }
+
+        const heightLoss = baseViewportHeight - window.visualViewport.height;
+        if (heightLoss > 120) {
+          window.requestAnimationFrame(adjustQuestionPosition);
+        }
+      });
+    }
+
     window.addEventListener('resize', () => {
-      if (inputEngaged) {
-        window.requestAnimationFrame(adjustQuestionPosition);
+      if (!inputEngaged) {
+        baseViewportHeight = Math.max(baseViewportHeight, window.innerHeight);
+        return;
       }
+
+      window.requestAnimationFrame(adjustQuestionPosition);
     });
 
     function showCorrectAnswer(text) {
@@ -364,13 +383,32 @@
     function handleInputFocus() {
       inputEngaged = true;
       document.body.classList.add('input-engaged');
-      setTimeout(adjustQuestionPosition, 80);
+      waitForKeyboardAndAdjust();
     }
 
     function handleInputBlur() {
       inputEngaged = false;
       document.body.classList.remove('input-engaged');
       resetQuestionShift();
+    }
+
+    function waitForKeyboardAndAdjust(attempt = 0) {
+      if (!inputEngaged) return;
+
+      const viewportHeight = window.visualViewport?.height || window.innerHeight;
+      const heightLoss = baseViewportHeight - viewportHeight;
+      const keyboardLikelyOpen = heightLoss > 120;
+
+      if (keyboardLikelyOpen) {
+        window.requestAnimationFrame(adjustQuestionPosition);
+        return;
+      }
+
+      if (attempt < 6) {
+        setTimeout(() => waitForKeyboardAndAdjust(attempt + 1), 80);
+      } else {
+        window.requestAnimationFrame(adjustQuestionPosition);
+      }
     }
 
     function adjustQuestionPosition() {
