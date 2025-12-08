@@ -300,12 +300,14 @@
     answerForm.addEventListener('submit', (event) => {
       event.preventDefault();
       if (!currentQuizId) return;
+      const trimmedAnswer = answerInput.value.trim();
+      if (!trimmedAnswer) return;
       setAnswerWaiting(true);
       socket.emit('player:answer', {
         quizId: currentQuizId,
-        answer: answerInput.value,
+        answer: trimmedAnswer,
       });
-      lastSubmittedAnswer = answerInput.value.trim();
+      lastSubmittedAnswer = trimmedAnswer;
       showSubmission({
         status: 'pending',
       });
