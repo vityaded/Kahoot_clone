@@ -243,6 +243,7 @@
         renderMedia(question.media);
         hideOverlay();
         stopLobbyCountdown();
+        setAnswerWaiting(hasAnswered);
         if (hasAnswered) {
           answerForm.classList.add('hidden');
           answerFeedback.textContent = 'Answer received!';
@@ -262,6 +263,7 @@
         questionProgress.textContent = 'Waiting for host...';
         questionText.textContent = 'Waiting for the host to start...';
         answerForm.classList.add('hidden');
+        setAnswerWaiting(false);
         answerFeedback.textContent = '';
         answerFeedback.className = '';
         questionMedia.innerHTML = '';
