@@ -44,6 +44,41 @@ body.library {
   z-index: -1;
 }
 
+.flash-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: transparent;
+  opacity: 0;
+  transition: opacity 200ms ease;
+  z-index: 5;
+}
+
+.flash-overlay.active {
+  opacity: 1;
+  animation: flash-fade 650ms ease forwards;
+}
+
+.flash-overlay.flash-success {
+  background: radial-gradient(circle at 50% 50%, rgba(104, 236, 169, 0.35), rgba(104, 236, 169, 0.1));
+}
+
+.flash-overlay.flash-error {
+  background: radial-gradient(circle at 50% 50%, rgba(255, 132, 132, 0.35), rgba(255, 132, 132, 0.08));
+}
+
+@keyframes flash-fade {
+  0% {
+    opacity: 0.85;
+  }
+  60% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
 header {
   text-align: center;
   margin-bottom: 24px;
@@ -528,6 +563,32 @@ body.player-view {
   font-size: clamp(1.8rem, 4vw, 2.8rem);
   line-height: 1.2;
   margin: 10px 0 18px;
+}
+
+.correct-answer {
+  min-height: 32px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 14px;
+  margin: 8px auto 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  max-width: 520px;
+  transition: opacity 200ms ease, transform 200ms ease;
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.correct-answer.visible {
+  display: inline-flex;
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .corner-badge {
