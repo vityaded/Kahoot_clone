@@ -179,6 +179,7 @@
       questionText.textContent = prompt;
       answerFeedback.textContent = '';
       answerFeedback.className = '';
+      lobbyStatus.textContent = '';
       clearSubmission();
       answerForm.classList.remove('hidden');
       setAnswerWaiting(false);
@@ -194,7 +195,11 @@
     socket.on('question:end', ({ correctAnswer }) => {
       stopTimer();
       questionText.textContent = `Time's up! Correct answer: ${correctAnswer}`;
-      showSubmission({ correctAnswer });
+      if (lastSubmittedAnswer) {
+        showSubmission({ correctAnswer });
+      } else {
+        clearSubmission();
+      }
       answerForm.classList.add('hidden');
       setAnswerWaiting(false);
       questionMedia.innerHTML = '';
@@ -257,6 +262,7 @@
         renderMedia(question.media);
         hideOverlay();
         stopLobbyCountdown();
+        lobbyStatus.textContent = '';
         setAnswerWaiting(hasAnswered);
         clearSubmission();
         if (hasAnswered) {
@@ -431,6 +437,7 @@
         clearInterval(lobbyCountdown);
         lobbyCountdown = null;
       }
+      lobbyStatus.textContent = '';
     }
 
   </script>
