@@ -264,12 +264,13 @@
         stopLobbyCountdown();
         lobbyStatus.textContent = '';
         setAnswerWaiting(hasAnswered);
-        clearSubmission();
         if (hasAnswered) {
           answerForm.classList.add('hidden');
           answerFeedback.textContent = 'Answer received!';
           answerFeedback.className = 'success';
+          showSubmission({ status: 'pending' });
         } else {
+          clearSubmission();
           answerForm.classList.remove('hidden');
           answerInput.value = '';
           answerInput.focus();
@@ -308,9 +309,7 @@
         answer: trimmedAnswer,
       });
       lastSubmittedAnswer = trimmedAnswer;
-      showSubmission({
-        status: 'pending',
-      });
+      showSubmission({ status: 'pending' });
     });
 
     function setAnswerWaiting(isWaiting) {
