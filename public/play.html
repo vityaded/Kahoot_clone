@@ -31,12 +31,6 @@
         <button type="submit">Submit answer</button>
       </form>
 
-      <div id="submission-status" class="card submission-card hidden" aria-live="polite">
-        <p id="submission-label" class="eyebrow">Submission</p>
-        <p id="submission-answer" class="submitted-answer"></p>
-        <p id="submission-correct" class="muted"></p>
-      </div>
-
       <div class="card leaderboard-card" id="leaderboard-card">
         <div class="leaderboard-header">
           <h2>Leaderboard</h2>
@@ -76,10 +70,6 @@
     const overlayList = document.getElementById('overlay-leaderboard');
     const overlayHint = document.getElementById('overlay-hint');
     const leaderboardCard = document.getElementById('leaderboard-card');
-    const submissionCard = document.getElementById('submission-status');
-    const submissionLabel = document.getElementById('submission-label');
-    const submissionAnswer = document.getElementById('submission-answer');
-    const submissionCorrect = document.getElementById('submission-correct');
 
     const playerIdFromStorage = localStorage.getItem('playerId');
     let storedPlayerId = playerIdFromStorage;
@@ -100,7 +90,6 @@
     let timerInterval = null;
     let lobbyCountdown = null;
     let hasJoinedOnce = Boolean(playerIdFromStorage);
-    let lastSubmittedAnswer = '';
 
     function joinQuiz(message = 'Joining game...') {
       storedName = localStorage.getItem('playerName');
@@ -180,7 +169,6 @@
       answerFeedback.textContent = '';
       answerFeedback.className = '';
       lobbyStatus.textContent = '';
-      clearSubmission();
       answerForm.classList.remove('hidden');
       setAnswerWaiting(false);
       answerInput.value = '';
@@ -195,11 +183,6 @@
     socket.on('question:end', ({ correctAnswer }) => {
       stopTimer();
       questionText.textContent = `Time's up! Correct answer: ${correctAnswer}`;
-      if (lastSubmittedAnswer) {
-        showSubmission({ correctAnswer });
-      } else {
-        clearSubmission();
-      }
       answerForm.classList.add('hidden');
       setAnswerWaiting(false);
       questionMedia.innerHTML = '';
@@ -243,10 +226,6 @@
       }
       answerForm.classList.add('hidden');
       setAnswerWaiting(false);
-      showSubmission({
-        correctAnswer,
-        status: correct ? 'correct' : 'incorrect',
-      });
     });
 
     socket.on('leaderboard:update', (players) => {
@@ -268,9 +247,7 @@
           answerForm.classList.add('hidden');
           answerFeedback.textContent = 'Answer received!';
           answerFeedback.className = 'success';
-          showSubmission({ status: 'pending' });
         } else {
-          clearSubmission();
           answerForm.classList.remove('hidden');
           answerInput.value = '';
           answerInput.focus();
@@ -308,8 +285,8 @@
         quizId: currentQuizId,
         answer: trimmedAnswer,
       });
-      lastSubmittedAnswer = trimmedAnswer;
-      showSubmission({ status: 'pending' });
+      answerFeedback.textContent = 'Answer submitted! Waiting for result...';
+      answerFeedback.className = 'muted';
     });
 
     function setAnswerWaiting(isWaiting) {
@@ -351,45 +328,6 @@
         li.innerHTML = `<span>${index + 1}. ${player.name}</span><span>${player.score} pts</span>`;
         leaderboard.appendChild(li);
       });
-    }
-
-    function showSubmission({ status, correctAnswer }) {
-      const hasAnswer = Boolean(lastSubmittedAnswer);
-
-      if (!hasAnswer) {
-        submissionCard.classList.add('hidden');
-        return;
-      }
-
-      submissionCard.classList.remove('hidden');
-      submissionAnswer.textContent = `Your answer: ${lastSubmittedAnswer}`;
-
-      if (status === 'pending') {
-        submissionLabel.textContent = 'Submitted — waiting for result';
-        submissionCorrect.classList.add('hidden');
-      } else if (status === 'correct') {
-        submissionLabel.textContent = 'Great job!';
-        submissionCorrect.classList.remove('hidden');
-      } else if (status === 'incorrect') {
-        submissionLabel.textContent = 'Submitted';
-        submissionCorrect.classList.remove('hidden');
-      } else {
-        submissionLabel.textContent = 'Round summary';
-        submissionCorrect.classList.remove('hidden');
-      }
-
-      if (correctAnswer) {
-        submissionCorrect.textContent = `Correct answer: ${correctAnswer}`;
-      }
-    }
-
-    function clearSubmission() {
-      submissionCard.classList.add('hidden');
-      submissionLabel.textContent = 'Submission';
-      submissionAnswer.textContent = '';
-      submissionCorrect.textContent = '';
-      submissionCorrect.classList.add('hidden');
-      lastSubmittedAnswer = '';
     }
 
     function renderMedia(media) {
