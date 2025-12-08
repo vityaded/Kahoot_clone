@@ -29,11 +29,6 @@
           <input type="text" id="answer-input" autocomplete="off" />
         </label>
         <button type="submit">Submit answer</button>
-        <div id="answer-waiting" class="waiting-state hidden" role="status" aria-live="polite">
-          <span class="spinner" aria-hidden="true"></span>
-          <span>Answer submitted—waiting for results</span>
-        </div>
-        <p class="muted">We'll lock it in right away, so double check before sending.</p>
       </form>
 
       <div id="submission-status" class="card submission-card hidden" aria-live="polite">
@@ -42,7 +37,7 @@
         <p id="submission-correct" class="muted"></p>
       </div>
 
-      <div class="card leaderboard-card">
+      <div class="card leaderboard-card" id="leaderboard-card">
         <div class="leaderboard-header">
           <h2>Leaderboard</h2>
           <p class="muted">Live rankings</p>
@@ -73,7 +68,6 @@
     const answerForm = document.getElementById('answer-form');
     const answerInput = document.getElementById('answer-input');
     const submitButton = answerForm.querySelector('button');
-    const answerWaiting = document.getElementById('answer-waiting');
     const answerFeedback = document.getElementById('answer-feedback');
     const leaderboard = document.getElementById('leaderboard');
     const questionMedia = document.getElementById('question-media');
@@ -81,6 +75,7 @@
     const overlay = document.getElementById('leaderboard-overlay');
     const overlayList = document.getElementById('overlay-leaderboard');
     const overlayHint = document.getElementById('overlay-hint');
+    const leaderboardCard = document.getElementById('leaderboard-card');
     const submissionCard = document.getElementById('submission-status');
     const submissionLabel = document.getElementById('submission-label');
     const submissionAnswer = document.getElementById('submission-answer');
@@ -193,6 +188,7 @@
       startTimer(duration);
       hideOverlay();
       stopLobbyCountdown();
+      toggleLeaderboard(false);
     });
 
     socket.on('question:end', ({ correctAnswer }) => {
@@ -203,6 +199,7 @@
       setAnswerWaiting(false);
       questionMedia.innerHTML = '';
       timerEl.textContent = 'Time!';
+      toggleLeaderboard(true);
     });
 
     socket.on('leaderboard:show', ({ leaderboard: board, duration }) => {
@@ -217,6 +214,7 @@
       setAnswerWaiting(false);
       questionMedia.innerHTML = '';
       timerEl.textContent = '--';
+      toggleLeaderboard(true);
     });
 
     socket.on('quiz:ended', () => {
@@ -227,6 +225,7 @@
       setAnswerWaiting(false);
       questionMedia.innerHTML = '';
       timerEl.textContent = '--';
+      toggleLeaderboard(true);
     });
 
     socket.on('player:answerResult', ({ correct, earned, correctAnswer }) => {
@@ -273,6 +272,7 @@
         }
         const remaining = timeRemaining ?? question.duration;
         startTimer(remaining);
+        toggleLeaderboard(false);
       } else {
         stopTimer();
         timerEl.textContent = '--';
@@ -283,6 +283,7 @@
         answerFeedback.textContent = '';
         answerFeedback.className = '';
         questionMedia.innerHTML = '';
+        toggleLeaderboard(true);
       }
     });
 
@@ -307,7 +308,6 @@
     function setAnswerWaiting(isWaiting) {
       answerInput.disabled = isWaiting;
       submitButton.disabled = isWaiting;
-      answerWaiting.classList.toggle('hidden', !isWaiting);
     }
 
     function startTimer(seconds) {
@@ -407,6 +407,10 @@
     function hideOverlay() {
       overlay.classList.add('hidden');
       overlayList.innerHTML = '';
+    }
+
+    function toggleLeaderboard(show) {
+      leaderboardCard.classList.toggle('hidden', !show);
     }
 
     function startLobbyCountdown(seconds) {
