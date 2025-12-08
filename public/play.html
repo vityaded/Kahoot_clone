@@ -70,26 +70,42 @@
     const overlayList = document.getElementById('overlay-leaderboard');
     const overlayHint = document.getElementById('overlay-hint');
 
-    const storedName = sessionStorage.getItem('playerName');
-    const storedQuiz = sessionStorage.getItem('quizCode');
+    function getPlayerId() {
+      let id = localStorage.getItem('playerId');
+      if (!id) {
+        id = (crypto.randomUUID && crypto.randomUUID()) || `player-${Math.random().toString(16).slice(2)}`;
+        localStorage.setItem('playerId', id);
+      }
+      return id;
+    }
+
+    const storedName = sessionStorage.getItem('playerName') || localStorage.getItem('lastPlayerName');
+    const storedQuiz = sessionStorage.getItem('quizCode') || localStorage.getItem('lastQuizCode');
+    const playerId = getPlayerId();
     if (!storedName || !storedQuiz) {
       window.location.href = '/join.html';
+    } else {
+      sessionStorage.setItem('playerName', storedName);
+      sessionStorage.setItem('quizCode', storedQuiz);
     }
 
     let currentQuizId = null;
     let timerInterval = null;
     let lobbyCountdown = null;
+    let hasJoined = false;
 
     function joinQuiz() {
       lobbyStatus.textContent = 'Joining game...';
       socket.emit('player:join', {
         quizId: storedQuiz,
         name: storedName,
+        playerId,
       });
     }
 
     socket.on('player:joined', ({ quizId, title, totalQuestions }) => {
       currentQuizId = quizId;
+      hasJoined = true;
       joinError.textContent = '';
       lobbyStatus.textContent = `Joined "${title}". Waiting for the first question...`;
       answerFeedback.textContent = '';
@@ -100,18 +116,24 @@
       lobbyStatus.textContent = 'Unable to join. Please re-enter the code and nickname.';
     });
 
-    socket.on('question:start', ({ prompt, index, total, duration, media }) => {
+    function showQuestion({ prompt, index, total, duration, media, timeRemaining, hasAnswered }) {
       questionProgress.textContent = `Question ${index} of ${total}`;
       questionText.textContent = prompt;
-      answerFeedback.textContent = '';
-      answerFeedback.className = '';
-      answerForm.classList.remove('hidden');
+      answerFeedback.textContent = hasAnswered ? 'Answer submitted. Waiting...' : '';
+      answerFeedback.className = hasAnswered ? 'muted' : '';
+      answerForm.classList.toggle('hidden', Boolean(hasAnswered));
       answerInput.value = '';
-      answerInput.focus();
+      if (!hasAnswered) {
+        answerInput.focus();
+      }
       renderMedia(media);
-      startTimer(duration);
+      startTimer(timeRemaining ?? duration);
       hideOverlay();
       stopLobbyCountdown();
+    }
+
+    socket.on('question:start', ({ prompt, index, total, duration, media }) => {
+      showQuestion({ prompt, index, total, duration, media, timeRemaining: duration, hasAnswered: false });
     });
 
     socket.on('question:end', ({ correctAnswer }) => {
@@ -157,17 +179,55 @@
       questionMedia.innerHTML = '';
     });
 
-    socket.on('leaderboard:update', (players) => {
+    function renderLeaderboard(players) {
       leaderboard.innerHTML = '';
       players.forEach((player, index) => {
         const li = document.createElement('li');
         li.innerHTML = `<span>${index + 1}. ${player.name}</span><span>${player.score} pts</span>`;
         leaderboard.appendChild(li);
       });
+    }
+
+    socket.on('leaderboard:update', (players) => {
+      renderLeaderboard(players);
     });
 
     socket.on('quiz:countdown', ({ seconds }) => {
       startLobbyCountdown(seconds);
+    });
+
+    socket.on('player:state', (state) => {
+      currentQuizId = state.quizId;
+      renderLeaderboard(state.leaderboard || []);
+
+      if (state.lobbyCountdownSeconds) {
+        startLobbyCountdown(state.lobbyCountdownSeconds);
+      } else {
+        stopLobbyCountdown();
+      }
+
+      if (state.question) {
+        showQuestion(state.question);
+        lobbyStatus.textContent = 'You are back in the game!';
+      } else if (state.quizFinished) {
+        stopTimer();
+        questionProgress.textContent = 'Quiz finished';
+        questionText.textContent = 'Quiz finished! Check the leaderboard for final scores.';
+        answerForm.classList.add('hidden');
+        questionMedia.innerHTML = '';
+        timerEl.textContent = '--';
+        lobbyStatus.textContent = 'Quiz finished';
+      } else if (state.currentQuestionIndex === -1) {
+        lobbyStatus.textContent = 'Waiting for the host to start...';
+      } else {
+        lobbyStatus.textContent = 'Waiting for the next question...';
+      }
+
+      if (state.overlay) {
+        renderOverlay(state.overlay.leaderboard, state.overlay.duration);
+      } else {
+        hideOverlay();
+      }
     });
 
     answerForm.addEventListener('submit', (event) => {
@@ -181,7 +241,8 @@
 
     function startTimer(seconds) {
       stopTimer();
-      let remaining = seconds;
+      const initial = Number.isFinite(seconds) ? seconds : 0;
+      let remaining = Math.max(0, initial);
       timerEl.textContent = `${remaining}s`;
       timerInterval = setInterval(() => {
         remaining -= 1;
@@ -249,7 +310,17 @@
       }
     }
 
-    joinQuiz();
+    socket.on('connect', () => {
+      if (hasJoined) {
+        socket.emit('player:requestState', { quizId: storedQuiz, playerId });
+      } else {
+        joinQuiz();
+      }
+    });
+
+    if (socket.connected) {
+      joinQuiz();
+    }
   </script>
 </body>
 </html>

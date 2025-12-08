@@ -34,12 +34,24 @@
     const playerName = document.getElementById('player-name');
     const nicknameError = document.getElementById('nickname-error');
 
+    function ensurePlayerId() {
+      let id = localStorage.getItem('playerId');
+      if (!id) {
+        id = (crypto.randomUUID && crypto.randomUUID()) || `player-${Math.random().toString(16).slice(2)}`;
+        localStorage.setItem('playerId', id);
+      }
+      return id;
+    }
+
     const quizCode = sessionStorage.getItem('quizCode');
     if (!quizCode) {
       window.location.href = '/join.html';
     } else {
       quizCodeDisplay.textContent = quizCode;
+      localStorage.setItem('lastQuizCode', quizCode);
     }
+
+    ensurePlayerId();
 
     nicknameForm.addEventListener('submit', (event) => {
       event.preventDefault();
@@ -49,6 +61,7 @@
         return;
       }
       sessionStorage.setItem('playerName', name);
+      localStorage.setItem('lastPlayerName', name);
       window.location.href = '/play.html';
     });
   </script>
