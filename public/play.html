@@ -184,10 +184,10 @@
       answerFeedback.className = '';
       showCorrectAnswer('');
       lobbyStatus.textContent = '';
+      resetInputEngagement();
       answerForm.classList.remove('hidden');
       setAnswerWaiting(false);
       answerInput.value = '';
-      answerInput.focus();
       hideResultOverlay();
       renderMedia(media);
       startTimer(duration);
@@ -202,6 +202,7 @@
       showCorrectAnswer(`Correct answer: ${correctAnswer}`);
       answerForm.classList.add('hidden');
       setAnswerWaiting(false);
+      resetInputEngagement();
       hideResultOverlay();
       questionMedia.innerHTML = '';
       timerEl.textContent = 'Time!';
@@ -218,6 +219,7 @@
       questionText.textContent = 'Quiz finished! Check the leaderboard for final scores.';
       answerForm.classList.add('hidden');
       setAnswerWaiting(false);
+      resetInputEngagement();
       questionMedia.innerHTML = '';
       timerEl.textContent = '--';
       toggleLeaderboard(true);
@@ -229,6 +231,7 @@
       questionText.textContent = 'The host left the game. Quiz closed.';
       answerForm.classList.add('hidden');
       setAnswerWaiting(false);
+      resetInputEngagement();
       questionMedia.innerHTML = '';
       timerEl.textContent = '--';
       toggleLeaderboard(true);
@@ -243,6 +246,7 @@
         answerFeedback.className = 'error';
       }
       showCorrectAnswer(`Correct answer: ${correctAnswer}`);
+      resetInputEngagement();
       triggerFlash(correct);
       showResultOverlay(correct);
       answerForm.classList.add('hidden');
@@ -270,8 +274,8 @@
           answerFeedback.className = 'success';
         } else {
           answerForm.classList.remove('hidden');
+          resetInputEngagement();
           answerInput.value = '';
-          answerInput.focus();
           answerFeedback.textContent = '';
           answerFeedback.className = '';
         }
@@ -285,6 +289,7 @@
         questionText.textContent = 'Waiting for the host to start...';
         answerForm.classList.add('hidden');
         setAnswerWaiting(false);
+        resetInputEngagement();
         answerFeedback.textContent = '';
         answerFeedback.className = '';
         showCorrectAnswer('');
@@ -388,6 +393,10 @@
     }
 
     function handleInputBlur() {
+      resetInputEngagement();
+    }
+
+    function resetInputEngagement() {
       inputEngaged = false;
       document.body.classList.remove('input-engaged');
       resetQuestionShift();
