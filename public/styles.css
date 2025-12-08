@@ -60,11 +60,60 @@ body.library {
 }
 
 .flash-overlay.flash-success {
-  background: radial-gradient(circle at 50% 50%, rgba(104, 236, 169, 0.35), rgba(104, 236, 169, 0.1));
+  background: radial-gradient(circle at 50% 50%, rgba(58, 255, 179, 0.55), rgba(58, 255, 179, 0.15));
 }
 
 .flash-overlay.flash-error {
-  background: radial-gradient(circle at 50% 50%, rgba(255, 132, 132, 0.35), rgba(255, 132, 132, 0.08));
+  background: radial-gradient(circle at 50% 50%, rgba(255, 109, 109, 0.55), rgba(255, 109, 109, 0.12));
+}
+
+.result-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at 50% 40%, rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0.6));
+  z-index: 6;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 220ms ease;
+}
+
+.result-overlay.visible {
+  opacity: 1;
+}
+
+.result-overlay.correct {
+  background: radial-gradient(circle at 50% 40%, rgba(46, 255, 175, 0.4), rgba(0, 0, 0, 0.65));
+}
+
+.result-overlay.incorrect {
+  background: radial-gradient(circle at 50% 40%, rgba(255, 74, 74, 0.42), rgba(0, 0, 0, 0.65));
+}
+
+.result-message {
+  font-size: clamp(2.4rem, 6vw, 3.6rem);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 16px 24px;
+  border-radius: 18px;
+  box-shadow: 0 22px 50px rgba(0, 0, 0, 0.4);
+  background: rgba(0, 0, 0, 0.35);
+  border: 2px solid rgba(255, 255, 255, 0.18);
+}
+
+.result-overlay.correct .result-message {
+  color: #00ffb0;
+  border-color: rgba(0, 255, 176, 0.55);
+  text-shadow: 0 8px 24px rgba(0, 255, 176, 0.4);
+}
+
+.result-overlay.incorrect .result-message {
+  color: #ff7b7b;
+  border-color: rgba(255, 123, 123, 0.65);
+  text-shadow: 0 8px 24px rgba(255, 123, 123, 0.4);
 }
 
 @keyframes flash-fade {
@@ -553,10 +602,36 @@ body.player-view {
   text-align: center;
   padding: 32px 24px;
   overflow: hidden;
+  --question-shift: 0px;
 }
 
 .question-content {
   max-width: 900px;
+  transition: transform 220ms ease;
+}
+
+.question-board.question-shifted .question-content {
+  transform: translateY(var(--question-shift));
+}
+
+body.player-view.input-engaged .player-container {
+  padding-bottom: 8px;
+  gap: 10px;
+}
+
+body.player-view.input-engaged .question-board {
+  align-items: flex-start;
+  min-height: 320px;
+}
+
+@media (max-width: 700px) {
+  body.player-view.input-engaged .question-board {
+    min-height: 240px;
+  }
+
+  body.player-view.input-engaged .response-panel {
+    margin-top: -6px;
+  }
 }
 
 .question-content h1 {

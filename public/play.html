@@ -9,6 +9,9 @@
 <body class="player-view">
   <div class="glow"></div>
   <div id="flash-overlay" class="flash-overlay"></div>
+  <div id="answer-result-overlay" class="result-overlay hidden" aria-live="polite">
+    <div id="answer-result-message" class="result-message"></div>
+  </div>
   <main class="player-container">
     <div class="player-status" id="lobby-status">Connecting to the game...</div>
     <p id="join-error" class="error"></p>
@@ -74,6 +77,9 @@
     const leaderboardCard = document.getElementById('leaderboard-card');
     const correctAnswerDisplay = document.getElementById('correct-answer-display');
     const flashOverlay = document.getElementById('flash-overlay');
+    const questionBoard = document.querySelector('.question-board');
+    const resultOverlay = document.getElementById('answer-result-overlay');
+    const resultMessage = document.getElementById('answer-result-message');
 
     const playerIdFromStorage = localStorage.getItem('playerId');
     let storedPlayerId = playerIdFromStorage;
@@ -94,6 +100,8 @@
     let timerInterval = null;
     let lobbyCountdown = null;
     let hasJoinedOnce = Boolean(playerIdFromStorage);
+    let resultOverlayTimeout = null;
+    let inputEngaged = false;
 
     function joinQuiz(message = 'Joining game...') {
       storedName = localStorage.getItem('playerName');
@@ -178,6 +186,7 @@
       setAnswerWaiting(false);
       answerInput.value = '';
       answerInput.focus();
+      hideResultOverlay();
       renderMedia(media);
       startTimer(duration);
       hideOverlay();
@@ -191,6 +200,7 @@
       showCorrectAnswer(`Correct answer: ${correctAnswer}`);
       answerForm.classList.add('hidden');
       setAnswerWaiting(false);
+      hideResultOverlay();
       questionMedia.innerHTML = '';
       timerEl.textContent = 'Time!';
       toggleLeaderboard(true);
@@ -232,6 +242,7 @@
       }
       showCorrectAnswer(`Correct answer: ${correctAnswer}`);
       triggerFlash(correct);
+      showResultOverlay(correct);
       answerForm.classList.add('hidden');
       setAnswerWaiting(false);
     });
@@ -277,6 +288,7 @@
         showCorrectAnswer('');
         questionMedia.innerHTML = '';
         toggleLeaderboard(true);
+        hideResultOverlay();
       }
     });
 
@@ -298,6 +310,14 @@
       answerFeedback.className = 'muted';
     });
 
+    answerInput.addEventListener('focus', handleInputFocus);
+    answerInput.addEventListener('blur', handleInputBlur);
+    window.addEventListener('resize', () => {
+      if (inputEngaged) {
+        window.requestAnimationFrame(adjustQuestionPosition);
+      }
+    });
+
     function showCorrectAnswer(text) {
       correctAnswerDisplay.textContent = text;
       correctAnswerDisplay.classList.toggle('visible', Boolean(text));
@@ -314,6 +334,66 @@
       setTimeout(() => {
         flashOverlay.className = 'flash-overlay';
       }, 650);
+    }
+
+    function hideResultOverlay() {
+      clearTimeout(resultOverlayTimeout);
+      resultOverlayTimeout = null;
+      resultOverlay.classList.remove('visible', 'correct', 'incorrect');
+      resultOverlay.classList.add('hidden');
+    }
+
+    function showResultOverlay(isCorrect) {
+      const variant = isCorrect ? 'correct' : 'incorrect';
+      resultMessage.textContent = isCorrect ? 'Correct' : 'Incorrect';
+      resultOverlay.classList.remove('hidden', 'correct', 'incorrect', 'visible');
+      resultOverlay.classList.add(variant);
+      window.requestAnimationFrame(() => {
+        resultOverlay.classList.add('visible');
+      });
+
+      clearTimeout(resultOverlayTimeout);
+      resultOverlayTimeout = setTimeout(() => {
+        resultOverlay.classList.remove('visible');
+        setTimeout(() => {
+          resultOverlay.classList.add('hidden');
+        }, 240);
+      }, 1400);
+    }
+
+    function handleInputFocus() {
+      inputEngaged = true;
+      document.body.classList.add('input-engaged');
+      setTimeout(adjustQuestionPosition, 80);
+    }
+
+    function handleInputBlur() {
+      inputEngaged = false;
+      document.body.classList.remove('input-engaged');
+      resetQuestionShift();
+    }
+
+    function adjustQuestionPosition() {
+      if (!questionBoard || !questionText || !answerInput) return;
+      const questionRect = questionText.getBoundingClientRect();
+      const inputRect = answerInput.getBoundingClientRect();
+      const desiredGap = 12;
+      const rawShift = inputRect.top - questionRect.bottom - desiredGap;
+      const boardRect = questionBoard.getBoundingClientRect();
+      const maxShift = Math.max(0, boardRect.bottom - questionRect.bottom - 8);
+      const safeShift = Math.min(Math.max(rawShift, 0), maxShift);
+
+      if (safeShift > 2) {
+        questionBoard.style.setProperty('--question-shift', `${safeShift}px`);
+        questionBoard.classList.add('question-shifted');
+      } else {
+        resetQuestionShift();
+      }
+    }
+
+    function resetQuestionShift() {
+      questionBoard?.style.removeProperty('--question-shift');
+      questionBoard?.classList.remove('question-shifted');
     }
 
     function startTimer(seconds) {
