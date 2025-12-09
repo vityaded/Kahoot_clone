@@ -19,6 +19,7 @@
         <p class="eyebrow">Question</p>
         <h1 id="question-text">Waiting for the host to start...</h1>
         <div id="correct-answer-display" class="correct-answer" aria-live="polite"></div>
+        <div id="player-answer-display" class="player-answer" aria-live="polite"></div>
         <div class="media-preview" id="question-media"></div>
       </div>
     </section>
@@ -61,6 +62,8 @@
     </div>
   </div>
 
+  <div id="answer-indicator" class="answer-indicator hidden" aria-live="assertive" aria-atomic="true"></div>
+
   <script src="/socket.io/socket.io.js"></script>
   <script>
     const socket = io();
@@ -81,7 +84,9 @@
     const overlayHint = document.getElementById('overlay-hint');
     const leaderboardCard = document.getElementById('leaderboard-card');
     const correctAnswerDisplay = document.getElementById('correct-answer-display');
+    const playerAnswerDisplay = document.getElementById('player-answer-display');
     const questionBoard = document.querySelector('.question-board');
+    const answerIndicator = document.getElementById('answer-indicator');
 
     function applyAnswerInputSafeguards() {
       answerForm.setAttribute('autocomplete', 'off');
@@ -113,6 +118,8 @@
     let hasJoinedOnce = Boolean(playerIdFromStorage);
     let inputEngaged = false;
     let baseViewportHeight = window.visualViewport?.height || window.innerHeight;
+    let lastSubmittedAnswer = '';
+    let playerHasAnswered = false;
 
     function joinQuiz(message = 'Joining game...') {
       storedName = localStorage.getItem('playerName');
@@ -192,12 +199,15 @@
       answerFeedback.textContent = '';
       answerFeedback.className = '';
       showCorrectAnswer('');
+      showPlayerAnswer('');
       lobbyStatus.textContent = '';
       resetInputEngagement();
       applyAnswerInputSafeguards();
       answerForm.classList.remove('hidden');
       setAnswerWaiting(false);
       answerInput.value = '';
+      lastSubmittedAnswer = '';
+      playerHasAnswered = false;
       renderMedia(media);
       startTimer(duration);
       hideOverlay();
@@ -208,6 +218,8 @@
     socket.on('question:end', ({ correctAnswer }) => {
       stopTimer();
       showCorrectAnswer(`Correct answer: ${correctAnswer}`);
+      const answerText = playerHasAnswered && lastSubmittedAnswer ? lastSubmittedAnswer : 'No answer submitted';
+      showPlayerAnswer(`Your answer: ${answerText}`);
       answerForm.classList.add('hidden');
       setAnswerWaiting(false);
       resetInputEngagement();
@@ -244,15 +256,21 @@
       toggleLeaderboard(false);
     });
 
-    socket.on('player:answerResult', ({ correct, earned, correctAnswer }) => {
+    socket.on('player:answerResult', ({ correct, earned, correctAnswer, playerAnswer }) => {
       if (correct) {
         answerFeedback.textContent = `Correct! +${earned} points`;
         answerFeedback.className = 'success';
+        showAnswerIndicator(true);
       } else {
         answerFeedback.textContent = 'Incorrect';
         answerFeedback.className = 'error';
+        showAnswerIndicator(false);
       }
       showCorrectAnswer(`Correct answer: ${correctAnswer}`);
+      lastSubmittedAnswer = playerAnswer ?? lastSubmittedAnswer;
+      const answerText = lastSubmittedAnswer || 'No answer submitted';
+      showPlayerAnswer(`Your answer: ${answerText}`);
+      playerHasAnswered = true;
       resetInputEngagement();
       answerForm.classList.add('hidden');
       setAnswerWaiting(false);
@@ -273,6 +291,7 @@
         stopLobbyCountdown();
         lobbyStatus.textContent = '';
         setAnswerWaiting(hasAnswered);
+        playerHasAnswered = hasAnswered;
         if (hasAnswered) {
           answerForm.classList.add('hidden');
           answerFeedback.textContent = '';
@@ -298,6 +317,7 @@
         answerFeedback.textContent = '';
         answerFeedback.className = '';
         showCorrectAnswer('');
+        showPlayerAnswer('');
         questionMedia.innerHTML = '';
         toggleLeaderboard(false);
       }
@@ -327,6 +347,8 @@
         quizId: currentQuizId,
         answer: trimmedAnswer,
       });
+      lastSubmittedAnswer = trimmedAnswer;
+      playerHasAnswered = true;
       answerFeedback.textContent = '';
       answerFeedback.className = '';
     });
@@ -363,6 +385,22 @@
     function showCorrectAnswer(text) {
       correctAnswerDisplay.textContent = text;
       correctAnswerDisplay.classList.toggle('visible', Boolean(text));
+    }
+
+    function showPlayerAnswer(text) {
+      playerAnswerDisplay.textContent = text;
+      playerAnswerDisplay.classList.toggle('visible', Boolean(text));
+    }
+
+    function showAnswerIndicator(isCorrect) {
+      answerIndicator.textContent = isCorrect ? '✓' : '✕';
+      answerIndicator.classList.remove('hidden', 'correct', 'incorrect');
+      answerIndicator.classList.add(isCorrect ? 'correct' : 'incorrect');
+      answerIndicator.classList.add('visible');
+      setTimeout(() => {
+        answerIndicator.classList.remove('visible');
+        answerIndicator.classList.add('hidden');
+      }, 1400);
     }
 
     function setAnswerWaiting(isWaiting) {

@@ -463,6 +463,7 @@ io.on('connection', (socket) => {
       correct: isCorrect,
       earned,
       correctAnswer: currentQuestion.answer,
+      playerAnswer: submitted,
     });
 
     emitLeaderboard(session.id);
