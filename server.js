@@ -178,12 +178,13 @@ function scheduleLeaderboard(sessionId, { fastForward = false } = {}) {
   if (!session) return;
   const leaderboard = formatLeaderboard(session);
   const hasMoreQuestions = session.currentQuestionIndex + 1 < session.questions.length;
+  const pauseSeconds = 3;
   io.to(`${QUIZ_ROOM_PREFIX}${sessionId}`).emit('leaderboard:show', {
     leaderboard,
-    duration: hasMoreQuestions ? (fastForward ? 1 : 2) : null,
+    duration: hasMoreQuestions ? pauseSeconds : null,
   });
 
-  const leaderboardDelay = fastForward ? 1000 : 2000;
+  const leaderboardDelay = pauseSeconds * 1000;
 
   if (hasMoreQuestions) {
     session.leaderboardTimer = setTimeout(() => startQuestion(sessionId), leaderboardDelay);

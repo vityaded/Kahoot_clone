@@ -121,6 +121,7 @@
     let resultOverlayTimeout = null;
     let inputEngaged = false;
     let baseViewportHeight = window.visualViewport?.height || window.innerHeight;
+    const RESULT_OVERLAY_DURATION = 3000;
 
     function joinQuiz(message = 'Joining game...') {
       storedName = localStorage.getItem('playerName');
@@ -221,14 +222,13 @@
       answerForm.classList.add('hidden');
       setAnswerWaiting(false);
       resetInputEngagement();
-      hideResultOverlay();
       questionMedia.innerHTML = '';
       timerEl.textContent = 'Time!';
-      toggleLeaderboard(true);
+      toggleLeaderboard(false);
     });
 
     socket.on('leaderboard:show', ({ leaderboard: board, duration }) => {
-      renderOverlay(board, duration);
+      hideOverlay();
     });
 
     socket.on('quiz:finished', () => {
@@ -240,7 +240,7 @@
       resetInputEngagement();
       questionMedia.innerHTML = '';
       timerEl.textContent = '--';
-      toggleLeaderboard(true);
+      toggleLeaderboard(false);
     });
 
     socket.on('quiz:ended', () => {
@@ -252,7 +252,7 @@
       resetInputEngagement();
       questionMedia.innerHTML = '';
       timerEl.textContent = '--';
-      toggleLeaderboard(true);
+      toggleLeaderboard(false);
     });
 
     socket.on('player:answerResult', ({ correct, earned, correctAnswer }) => {
@@ -312,7 +312,7 @@
         answerFeedback.className = '';
         showCorrectAnswer('');
         questionMedia.innerHTML = '';
-        toggleLeaderboard(true);
+        toggleLeaderboard(false);
         hideResultOverlay();
       }
     });
@@ -414,7 +414,7 @@
         setTimeout(() => {
           resultOverlay.classList.add('hidden');
         }, 240);
-      }, 1400);
+      }, RESULT_OVERLAY_DURATION);
     }
 
     function handleInputFocus() {
@@ -523,24 +523,13 @@
       }
     }
 
-    function renderOverlay(players, duration) {
-      overlayList.innerHTML = '';
-      players.forEach((player, index) => {
-        const item = document.createElement('li');
-        item.innerHTML = `<span>${index + 1}. ${player.name}</span><span>${player.score} pts</span>`;
-        overlayList.appendChild(item);
-      });
-      overlayHint.textContent = duration ? `Next question in ${duration}s` : 'Quiz finished';
-      overlay.classList.remove('hidden');
-    }
-
     function hideOverlay() {
       overlay.classList.add('hidden');
       overlayList.innerHTML = '';
     }
 
     function toggleLeaderboard(show) {
-      leaderboardCard.classList.toggle('hidden', !show);
+      leaderboardCard.classList.add('hidden');
     }
 
     function startLobbyCountdown(seconds) {
