@@ -28,10 +28,18 @@
     </section>
 
     <section class="response-panel">
-      <form id="answer-form" class="answer-card hidden">
+      <form id="answer-form" class="answer-card hidden" autocomplete="off">
         <label>
           Type your answer
-          <input type="text" id="answer-input" autocomplete="off" />
+          <input
+            type="text"
+            id="answer-input"
+            name="response-field"
+            autocomplete="new-password"
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck="false"
+          />
         </label>
         <button type="submit">Submit answer</button>
       </form>
@@ -81,6 +89,15 @@
     const questionBoard = document.querySelector('.question-board');
     const resultOverlay = document.getElementById('answer-result-overlay');
     const resultMessage = document.getElementById('answer-result-message');
+
+    function applyAnswerInputSafeguards() {
+      answerForm.setAttribute('autocomplete', 'off');
+      answerInput.setAttribute('name', 'response-field');
+      answerInput.setAttribute('autocomplete', 'new-password');
+      answerInput.setAttribute('autocapitalize', 'off');
+      answerInput.setAttribute('autocorrect', 'off');
+      answerInput.setAttribute('spellcheck', 'false');
+    }
 
     const playerIdFromStorage = localStorage.getItem('playerId');
     let storedPlayerId = playerIdFromStorage;
@@ -185,6 +202,7 @@
       showCorrectAnswer('');
       lobbyStatus.textContent = '';
       resetInputEngagement();
+      applyAnswerInputSafeguards();
       answerForm.classList.remove('hidden');
       setAnswerWaiting(false);
       answerInput.value = '';
