@@ -321,6 +321,16 @@
       startLobbyCountdown(seconds);
     });
 
+    function handleImmediateSubmit(event) {
+      if (!answerForm.requestSubmit || submitButton.disabled) return;
+      if (!currentQuizId) return;
+      const trimmedAnswer = answerInput.value.trim();
+      if (!trimmedAnswer) return;
+
+      event.preventDefault();
+      answerForm.requestSubmit();
+    }
+
     answerForm.addEventListener('submit', (event) => {
       event.preventDefault();
       if (!currentQuizId) return;
@@ -334,6 +344,9 @@
       answerFeedback.textContent = 'Answer submitted! Waiting for result...';
       answerFeedback.className = 'muted';
     });
+
+    submitButton.addEventListener('pointerdown', handleImmediateSubmit);
+    submitButton.addEventListener('touchstart', handleImmediateSubmit);
 
     answerInput.addEventListener('focus', handleInputFocus);
     answerInput.addEventListener('blur', handleInputBlur);
