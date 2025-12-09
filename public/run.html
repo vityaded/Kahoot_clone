@@ -39,7 +39,7 @@
         <form id="claim-form">
           <label>
             Quiz code
-            <input type="text" id="quiz-code" placeholder="123456" inputmode="numeric" pattern="\d{6}" maxlength="6" required />
+            <input type="text" id="quiz-code" placeholder="Enter quiz code" required />
           </label>
           <button type="submit">Connect as host</button>
           <p id="claim-error" class="error"></p>
@@ -185,9 +185,9 @@
     let quizTitle = '';
     let totalQuestions = 0;
 
-    function sanitizeCode(raw) {
-      const digits = raw?.trim().replace(/\D/g, '');
-      return digits && digits.length === 6 ? digits : '';
+    function normalizeHostCode(raw) {
+      const trimmed = raw?.trim();
+      return trimmed ? trimmed.toUpperCase() : '';
     }
 
     function buildJoinUrl(code) {
@@ -217,8 +217,8 @@
 
     function loadHostCredentials() {
       const params = new URLSearchParams(window.location.search);
-      const storedQuizId = sanitizeCode(sessionStorage.getItem('quizId'));
-      const paramCode = sanitizeCode(params.get('quizId'));
+      const storedQuizId = normalizeHostCode(sessionStorage.getItem('quizId'));
+      const paramCode = normalizeHostCode(params.get('quizId'));
       quizCodeInput.value = paramCode || storedQuizId || '';
     }
 
@@ -252,12 +252,12 @@
     claimForm.addEventListener('submit', (event) => {
       event.preventDefault();
       claimError.textContent = '';
-      const sanitized = sanitizeCode(quizCodeInput.value);
-      if (!sanitized) {
-        claimError.textContent = 'Enter a 6-digit quiz code to connect as host.';
+      const normalized = normalizeHostCode(quizCodeInput.value);
+      if (!normalized) {
+        claimError.textContent = 'Enter a quiz code to connect as host.';
         return;
       }
-      socket.emit('host:claimHost', { quizId: sanitized });
+      socket.emit('host:claimHost', { quizId: normalized });
     });
 
     socket.on('host:claimed', ({ quizId: id, title, totalQuestions: total, questionDuration, leaderboard }) => {
@@ -470,6 +470,10 @@
     });
 
     loadHostCredentials();
+    const initialCode = normalizeHostCode(quizCodeInput.value);
+    if (initialCode) {
+      socket.emit('host:claimHost', { quizId: initialCode });
+    }
   </script>
 </body>
 </html>
