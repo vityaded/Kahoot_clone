@@ -8,10 +8,6 @@
 </head>
 <body class="player-view">
   <div class="glow"></div>
-  <div id="flash-overlay" class="flash-overlay"></div>
-  <div id="answer-result-overlay" class="result-overlay hidden" aria-live="polite">
-    <div id="answer-result-message" class="result-message"></div>
-  </div>
   <main class="player-container">
     <div class="player-status" id="lobby-status">Connecting to the game...</div>
     <p id="join-error" class="error"></p>
@@ -85,10 +81,7 @@
     const overlayHint = document.getElementById('overlay-hint');
     const leaderboardCard = document.getElementById('leaderboard-card');
     const correctAnswerDisplay = document.getElementById('correct-answer-display');
-    const flashOverlay = document.getElementById('flash-overlay');
     const questionBoard = document.querySelector('.question-board');
-    const resultOverlay = document.getElementById('answer-result-overlay');
-    const resultMessage = document.getElementById('answer-result-message');
 
     function applyAnswerInputSafeguards() {
       answerForm.setAttribute('autocomplete', 'off');
@@ -118,10 +111,8 @@
     let timerInterval = null;
     let lobbyCountdown = null;
     let hasJoinedOnce = Boolean(playerIdFromStorage);
-    let resultOverlayTimeout = null;
     let inputEngaged = false;
     let baseViewportHeight = window.visualViewport?.height || window.innerHeight;
-    const RESULT_OVERLAY_DURATION = 3000;
 
     function joinQuiz(message = 'Joining game...') {
       storedName = localStorage.getItem('playerName');
@@ -207,7 +198,6 @@
       answerForm.classList.remove('hidden');
       setAnswerWaiting(false);
       answerInput.value = '';
-      hideResultOverlay();
       renderMedia(media);
       startTimer(duration);
       hideOverlay();
@@ -217,7 +207,6 @@
 
     socket.on('question:end', ({ correctAnswer }) => {
       stopTimer();
-      questionText.textContent = `Time's up! Correct answer: ${correctAnswer}`;
       showCorrectAnswer(`Correct answer: ${correctAnswer}`);
       answerForm.classList.add('hidden');
       setAnswerWaiting(false);
@@ -265,8 +254,6 @@
       }
       showCorrectAnswer(`Correct answer: ${correctAnswer}`);
       resetInputEngagement();
-      triggerFlash(correct);
-      showResultOverlay(correct);
       answerForm.classList.add('hidden');
       setAnswerWaiting(false);
     });
@@ -288,8 +275,8 @@
         setAnswerWaiting(hasAnswered);
         if (hasAnswered) {
           answerForm.classList.add('hidden');
-          answerFeedback.textContent = 'Answer received!';
-          answerFeedback.className = 'success';
+          answerFeedback.textContent = '';
+          answerFeedback.className = '';
         } else {
           answerForm.classList.remove('hidden');
           resetInputEngagement();
@@ -313,7 +300,6 @@
         showCorrectAnswer('');
         questionMedia.innerHTML = '';
         toggleLeaderboard(false);
-        hideResultOverlay();
       }
     });
 
@@ -341,8 +327,8 @@
         quizId: currentQuizId,
         answer: trimmedAnswer,
       });
-      answerFeedback.textContent = 'Answer submitted! Waiting for result...';
-      answerFeedback.className = 'muted';
+      answerFeedback.textContent = '';
+      answerFeedback.className = '';
     });
 
     submitButton.addEventListener('pointerdown', handleImmediateSubmit);
@@ -382,39 +368,6 @@
     function setAnswerWaiting(isWaiting) {
       answerInput.disabled = isWaiting;
       submitButton.disabled = isWaiting;
-    }
-
-    function triggerFlash(isCorrect) {
-      const variant = isCorrect ? 'flash-success' : 'flash-error';
-      flashOverlay.className = `flash-overlay ${variant} active`;
-      setTimeout(() => {
-        flashOverlay.className = 'flash-overlay';
-      }, 650);
-    }
-
-    function hideResultOverlay() {
-      clearTimeout(resultOverlayTimeout);
-      resultOverlayTimeout = null;
-      resultOverlay.classList.remove('visible', 'correct', 'incorrect');
-      resultOverlay.classList.add('hidden');
-    }
-
-    function showResultOverlay(isCorrect) {
-      const variant = isCorrect ? 'correct' : 'incorrect';
-      resultMessage.textContent = isCorrect ? 'Correct' : 'Incorrect';
-      resultOverlay.classList.remove('hidden', 'correct', 'incorrect', 'visible');
-      resultOverlay.classList.add(variant);
-      window.requestAnimationFrame(() => {
-        resultOverlay.classList.add('visible');
-      });
-
-      clearTimeout(resultOverlayTimeout);
-      resultOverlayTimeout = setTimeout(() => {
-        resultOverlay.classList.remove('visible');
-        setTimeout(() => {
-          resultOverlay.classList.add('hidden');
-        }, 240);
-      }, RESULT_OVERLAY_DURATION);
     }
 
     function handleInputFocus() {
