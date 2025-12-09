@@ -93,6 +93,32 @@
     </div>
   </footer>
 
+  <footer class="host-footer">
+    <div id="qr-section" class="qr-section hidden">
+      <p class="eyebrow">QR code</p>
+      <div class="footer-qr">
+        <button type="button" class="qr-wrapper" id="qr-trigger">
+          <img id="qr-image" src="" alt="QR code to join the quiz" />
+          <span class="qr-hint">Tap to enlarge</span>
+        </button>
+        <p class="qr-link" id="qr-link"></p>
+      </div>
+    </div>
+    <div class="footer-code">
+      <p class="eyebrow">Quiz code</p>
+      <div id="session-code" class="code muted">Awaiting quiz code...</div>
+      <p id="quiz-meta" class="muted"></p>
+    </div>
+    <div class="footer-duration">
+      <p class="eyebrow">Time setup</p>
+      <div class="inline-input stacked">
+        <input type="number" id="duration-input" min="5" max="300" />
+        <button type="button" id="update-duration" class="ghost">Update</button>
+      </div>
+      <div id="countdown-banner" class="muted"></div>
+    </div>
+  </footer>
+
   <div id="leaderboard-overlay" class="overlay hidden">
     <div class="overlay-card">
       <div class="leaderboard-header">
