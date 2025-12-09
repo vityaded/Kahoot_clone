@@ -172,22 +172,24 @@ function emitPlayerState(socket, session, playerId = null) {
   }
 }
 
-function scheduleLeaderboard(sessionId) {
+function scheduleLeaderboard(sessionId, { fastForward = false } = {}) {
   const session = sessions.get(sessionId);
   if (!session) return;
   const leaderboard = formatLeaderboard(session);
   const hasMoreQuestions = session.currentQuestionIndex + 1 < session.questions.length;
   io.to(`${QUIZ_ROOM_PREFIX}${sessionId}`).emit('leaderboard:show', {
     leaderboard,
-    duration: hasMoreQuestions ? 2 : null,
+    duration: hasMoreQuestions ? (fastForward ? 1 : 2) : null,
   });
 
+  const leaderboardDelay = fastForward ? 1000 : 2000;
+
   if (hasMoreQuestions) {
-    session.leaderboardTimer = setTimeout(() => startQuestion(sessionId), 2000);
+    session.leaderboardTimer = setTimeout(() => startQuestion(sessionId), leaderboardDelay);
   } else {
     session.leaderboardTimer = setTimeout(() => {
       io.to(`${QUIZ_ROOM_PREFIX}${sessionId}`).emit('quiz:finished');
-    }, 2000);
+    }, leaderboardDelay);
   }
 }
 
@@ -230,7 +232,7 @@ function startQuestion(sessionId) {
   session.questionTimer = setTimeout(() => endQuestion(sessionId), session.questionDuration * 1000);
 }
 
-function endQuestion(sessionId) {
+function endQuestion(sessionId, { fastForward = false } = {}) {
   const session = sessions.get(sessionId);
   if (!session || !session.questionActive) return;
   const currentQuestion = session.questions[session.currentQuestionIndex];
@@ -238,7 +240,7 @@ function endQuestion(sessionId) {
   io.to(`${QUIZ_ROOM_PREFIX}${sessionId}`).emit('question:end', {
     correctAnswer: currentQuestion?.answer,
   });
-  scheduleLeaderboard(sessionId);
+  scheduleLeaderboard(sessionId, { fastForward });
 }
 
 await loadPersistedQuizzes();
@@ -462,6 +464,15 @@ io.on('connection', (socket) => {
     });
 
     emitLeaderboard(session.id);
+
+    const allPlayersAnswered = session.answers.size === session.players.size && session.players.size > 0;
+    if (allPlayersAnswered) {
+      if (session.questionTimer) {
+        clearTimeout(session.questionTimer);
+        session.questionTimer = null;
+      }
+      endQuestion(session.id, { fastForward: true });
+    }
   });
 
   socket.on('host:endQuestion', ({ quizId }) => {
