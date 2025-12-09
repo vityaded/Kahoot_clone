@@ -256,15 +256,19 @@
       toggleLeaderboard(false);
     });
 
-    socket.on('player:answerResult', ({ correct, earned, correctAnswer, playerAnswer }) => {
+    socket.on('player:answerResult', ({ correct, partial, earned, correctAnswer, playerAnswer }) => {
       if (correct) {
         answerFeedback.textContent = `Correct! +${earned} points`;
         answerFeedback.className = 'success';
-        showAnswerIndicator(true);
+        showAnswerIndicator('correct');
+      } else if (partial) {
+        answerFeedback.textContent = `Almost! +${earned} points`;
+        answerFeedback.className = 'warning';
+        showAnswerIndicator('partial');
       } else {
         answerFeedback.textContent = 'Incorrect';
         answerFeedback.className = 'error';
-        showAnswerIndicator(false);
+        showAnswerIndicator('incorrect');
       }
       showCorrectAnswer(`Correct answer: ${correctAnswer}`);
       lastSubmittedAnswer = playerAnswer ?? lastSubmittedAnswer;
@@ -392,10 +396,15 @@
       playerAnswerDisplay.classList.toggle('visible', Boolean(text));
     }
 
-    function showAnswerIndicator(isCorrect) {
-      answerIndicator.textContent = isCorrect ? '✓' : '✕';
-      answerIndicator.classList.remove('hidden', 'correct', 'incorrect');
-      answerIndicator.classList.add(isCorrect ? 'correct' : 'incorrect');
+    function showAnswerIndicator(status) {
+      let label = '✕';
+      if (status === 'correct') label = '✓';
+      if (status === 'partial') label = 'OK';
+
+      answerIndicator.textContent = label;
+      answerIndicator.classList.remove('hidden', 'correct', 'incorrect', 'partial');
+      const className = status === 'correct' ? 'correct' : status === 'partial' ? 'partial' : 'incorrect';
+      answerIndicator.classList.add(className);
       answerIndicator.classList.add('visible');
       setTimeout(() => {
         answerIndicator.classList.remove('visible');
