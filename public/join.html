@@ -21,7 +21,7 @@
       <form id="join-form">
         <label>
           Game code
-          <input type="text" id="quiz-code" placeholder="ABC123" required />
+          <input type="text" id="quiz-code" placeholder="123456" inputmode="numeric" pattern="\d{6}" maxlength="6" required />
         </label>
         <button type="submit">Continue</button>
         <p id="join-error" class="error"></p>
@@ -34,11 +34,16 @@
     const quizCode = document.getElementById('quiz-code');
     const joinError = document.getElementById('join-error');
 
+    function sanitizeCode(raw) {
+      const digitsOnly = raw?.trim().replace(/\D/g, '');
+      return digitsOnly && digitsOnly.length === 6 ? digitsOnly : '';
+    }
+
     joinForm.addEventListener('submit', (event) => {
       event.preventDefault();
-      const code = quizCode.value.trim().toUpperCase();
+      const code = sanitizeCode(quizCode.value);
       if (!code) {
-        joinError.textContent = 'Enter the game code your host is showing.';
+        joinError.textContent = 'Enter the 6-digit game code your host is showing.';
         return;
       }
       localStorage.setItem('quizCode', code);
@@ -47,15 +52,14 @@
     });
 
     const params = new URLSearchParams(window.location.search);
-    const paramCode = params.get('quizId');
+    const paramCode = sanitizeCode(params.get('quizId'));
     const autoJoin = params.get('autoJoin') === '1' || params.get('via') === 'qr';
 
     if (paramCode) {
-      const upperCode = paramCode.trim().toUpperCase();
-      quizCode.value = upperCode;
+      quizCode.value = paramCode;
 
       if (autoJoin) {
-        localStorage.setItem('quizCode', upperCode);
+        localStorage.setItem('quizCode', paramCode);
         localStorage.removeItem('playerName');
         window.location.href = '/nickname.html';
       }

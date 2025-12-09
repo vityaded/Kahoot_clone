@@ -1,7 +1,7 @@
 import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
-import { nanoid } from 'nanoid';
+import { customAlphabet, nanoid } from 'nanoid';
 import { promises as fs } from 'fs';
 import path from 'path';
 
@@ -20,6 +20,7 @@ const DISCONNECT_GRACE_MS = 10000;
 const quizTemplates = new Map();
 const sessions = new Map();
 const playerSessions = new Map();
+const generateQuizCode = customAlphabet('0123456789', 6);
 
 function serializeForStorage() {
   return Array.from(quizTemplates.values()).map((quiz) => ({
@@ -93,7 +94,7 @@ function clearQuestionState(session) {
 }
 
 function createSessionFromTemplate(template, hostId = null) {
-  const sessionId = nanoid(6).toUpperCase();
+  const sessionId = generateQuizCode();
   const session = {
     id: sessionId,
     templateId: template.id,
@@ -266,7 +267,7 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const templateId = nanoid(6).toUpperCase();
+    const templateId = generateQuizCode();
     const template = {
       id: templateId,
       title: title?.trim() || 'Classroom Quiz',
