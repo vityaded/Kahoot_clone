@@ -21,6 +21,7 @@ const quizTemplates = new Map();
 const sessions = new Map();
 const playerSessions = new Map();
 const generateQuizCode = customAlphabet('0123456789', 6);
+const synonymCache = new Map();
 
 function serializeForStorage() {
   return Array.from(quizTemplates.values()).map((quiz) => ({
@@ -64,6 +65,80 @@ function buildMediaPayload(media) {
 
 function normalise(text = '') {
   return text.trim().toLowerCase();
+}
+
+function levenshtein(a, b) {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+
+  const matrix = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+  for (let j = 1; j <= b.length; j += 1) {
+    matrix[0][j] = j;
+  }
+
+  for (let i = 1; i <= a.length; i += 1) {
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,
+        matrix[i][j - 1] + 1,
+        matrix[i - 1][j - 1] + cost,
+      );
+    }
+  }
+
+  return matrix[a.length][b.length];
+}
+
+function similarity(a, b) {
+  if (!a && !b) return 1;
+  if (!a || !b) return 0;
+  const distance = levenshtein(a, b);
+  const maxLen = Math.max(a.length, b.length) || 1;
+  return 1 - distance / maxLen;
+}
+
+function isCloseMatch(submitted, expected) {
+  const closeness = similarity(submitted, expected);
+  if (closeness >= 0.82) return true;
+
+  if (submitted.length >= 5 && expected.includes(submitted)) return true;
+  if (expected.length >= 5 && submitted.includes(expected)) return true;
+
+  return false;
+}
+
+async function fetchSynonyms(word) {
+  const normalized = normalise(word);
+  if (!normalized) return [];
+  if (synonymCache.has(normalized)) return synonymCache.get(normalized);
+
+  try {
+    const response = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(normalized)}`);
+    if (!response.ok) {
+      synonymCache.set(normalized, []);
+      return [];
+    }
+
+    const payload = await response.json();
+    const synonyms = new Set();
+    payload?.forEach((entry) => {
+      entry?.meanings?.forEach((meaning) => {
+        meaning?.synonyms?.forEach((syn) => synonyms.add(normalise(syn)));
+        meaning?.definitions?.forEach((definition) => {
+          definition?.synonyms?.forEach((syn) => synonyms.add(normalise(syn)));
+        });
+      });
+    });
+
+    const result = Array.from(synonyms).filter(Boolean);
+    synonymCache.set(normalized, result);
+    return result;
+  } catch (_error) {
+    synonymCache.set(normalized, []);
+    return [];
+  }
 }
 
 function formatLeaderboard(session) {
@@ -261,6 +336,9 @@ io.on('connection', (socket) => {
         alternateAnswers: Array.isArray(q.alternateAnswers)
           ? q.alternateAnswers.map((alt) => alt.trim()).filter(Boolean)
           : [],
+        partialAnswers: Array.isArray(q.partialAnswers)
+          ? q.partialAnswers.map((alt) => alt.trim()).filter(Boolean)
+          : [],
         media: buildMediaPayload(q.media),
       }));
     if (!sanitizedQuestions.length) {
@@ -436,7 +514,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('player:answer', ({ quizId, answer }) => {
+  socket.on('player:answer', async ({ quizId, answer }) => {
     const session = sessions.get(quizId?.trim()?.toUpperCase());
     if (!session || !session.questionActive) return;
     const found = findPlayerBySocket(session, socket.id);
@@ -450,17 +528,41 @@ io.on('connection', (socket) => {
     const timeRemaining = Math.max(0, durationMs - elapsedMs);
 
     const expectedAnswers = [currentQuestion.answer, ...(currentQuestion.alternateAnswers || [])];
-    const isCorrect = expectedAnswers.some((expected) => normalise(submitted) === normalise(expected));
+    const normalizedSubmitted = normalise(submitted);
+    const normalizedExpected = expectedAnswers.map(normalise);
+    const normalizedPartial = (currentQuestion.partialAnswers || []).map(normalise);
+
+    const normalizedSynonyms = Array.from(
+      new Set(
+        (
+          await Promise.all(
+            expectedAnswers.map((expected) => fetchSynonyms(expected)),
+          )
+        )
+          .flat()
+          .filter(Boolean),
+      ),
+    );
+
+    const isCorrect = normalizedExpected.some((expected) => normalizedSubmitted === expected);
+    const isPartial =
+      !isCorrect &&
+      (normalizedPartial.includes(normalizedSubmitted) ||
+        normalizedSynonyms.includes(normalizedSubmitted) ||
+        normalizedSynonyms.some((syn) => isCloseMatch(normalizedSubmitted, syn)) ||
+        normalizedExpected.some((expected) => isCloseMatch(normalizedSubmitted, expected)));
     let earned = 0;
-    if (isCorrect) {
+    if (isCorrect || isPartial) {
       const speedBonus = Math.round((timeRemaining / durationMs) * 500);
-      earned = 1000 + speedBonus;
+      const baseScore = 1000 + speedBonus;
+      earned = isCorrect ? baseScore : Math.round(baseScore / 2);
       player.score += earned;
     }
 
     session.answers.add(player.id);
     socket.emit('player:answerResult', {
       correct: isCorrect,
+      partial: isPartial,
       earned,
       correctAnswer: currentQuestion.answer,
       playerAnswer: submitted,

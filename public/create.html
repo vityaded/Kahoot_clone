@@ -79,7 +79,7 @@
     const copyCodeBtn = document.getElementById('copy-code');
     const copyTemplateBtn = document.getElementById('copy-template');
 
-    function renderQuestionRow(index, prompt = '', answer = '', alternateAnswers = []) {
+    function renderQuestionRow(index, prompt = '', answer = '', alternateAnswers = [], partialAnswers = []) {
       const wrapper = document.createElement('div');
       wrapper.className = 'question-row media';
       wrapper.innerHTML = `
@@ -92,6 +92,9 @@
           </label>
           <label>Alternate answers (separate with ||)
             <input type="text" name="alternate" placeholder="Other phrasing that should count as correct (use || between options)" value="${alternateAnswers.join(' || ')}" />
+          </label>
+          <label>Partial credit answers (synonyms or near-misses, use ||)
+            <input type="text" name="partial" placeholder="Counts for half points (use || between options)" value="${partialAnswers.join(' || ')}" />
           </label>
         </div>
         <div class="media-picker">
@@ -147,7 +150,12 @@
         const prompt = row.querySelector('input[name="prompt"]').value;
         const answer = row.querySelector('input[name="answer"]').value;
         const alternateRaw = row.querySelector('input[name="alternate"]').value;
+        const partialRaw = row.querySelector('input[name="partial"]').value;
         const alternateAnswers = alternateRaw
+          .split(/\|\|/)
+          .map((part) => part.trim())
+          .filter(Boolean);
+        const partialAnswers = partialRaw
           .split(/\|\|/)
           .map((part) => part.trim())
           .filter(Boolean);
@@ -162,7 +170,7 @@
           else if (file.type.startsWith('video/')) type = 'video';
           media = { type, name: file.name, src };
         }
-        questions.push({ prompt, answer, alternateAnswers, media });
+        questions.push({ prompt, answer, alternateAnswers, partialAnswers, media });
       }
       return questions;
     }
@@ -196,7 +204,13 @@
 
     function appendBulkQuestions(questions) {
       questions.forEach((q) => {
-        renderQuestionRow(questionList.children.length, q.prompt, q.answer, q.alternateAnswers);
+        renderQuestionRow(
+          questionList.children.length,
+          q.prompt,
+          q.answer,
+          q.alternateAnswers,
+          q.partialAnswers,
+        );
       });
       updateQuestionLabels();
     }
