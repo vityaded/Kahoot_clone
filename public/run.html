@@ -17,28 +17,29 @@
     </div>
   </header>
 
+  <section class="card host-stage" aria-live="polite">
+    <div class="stage-meta">
+      <span id="stage-progress" class="eyebrow">Waiting to start</span>
+      <span id="stage-timer" class="stage-timer">--</span>
+    </div>
+    <div class="stage-content">
+      <p class="eyebrow">Question display</p>
+      <h1 id="stage-prompt">Launch a question to project it here.</h1>
+      <div id="stage-media" class="stage-media"></div>
+    </div>
+  </section>
+
   <main class="grid">
     <section class="card">
       <h2>Claim host control</h2>
       <form id="claim-form">
         <label>
           Quiz code
-          <input type="text" id="quiz-code" placeholder="ABC123" required />
+          <input type="text" id="quiz-code" placeholder="123456" required />
         </label>
         <button type="submit">Connect as host</button>
         <p id="claim-error" class="error"></p>
       </form>
-      <p id="quiz-meta" class="muted"></p>
-      <div id="session-code" class="code muted"></div>
-
-      <div id="qr-section" class="qr-section hidden">
-        <p class="muted">Share this QR so players can jump straight to the nickname screen.</p>
-        <button type="button" class="qr-wrapper" id="qr-trigger">
-          <img id="qr-image" src="" alt="QR code to join the quiz" />
-          <span class="qr-hint">Tap to enlarge</span>
-        </button>
-        <p class="qr-link" id="qr-link"></p>
-      </div>
     </section>
 
     <section class="card">
@@ -56,20 +57,36 @@
       <h2>Control room</h2>
       <div id="question-status" class="question-status">No question running.</div>
       <div id="media-preview" class="media-preview"></div>
-      <div class="control-row">
-        <label>
-          Seconds per question
-          <div class="inline-input">
-            <input type="number" id="duration-input" min="5" max="300" />
-            <button type="button" id="update-duration" class="ghost">Update</button>
-          </div>
-        </label>
-        <div id="countdown-banner" class="muted"></div>
-      </div>
       <button type="button" id="start-question" disabled>Start next question</button>
       <button type="button" id="end-question" class="ghost" disabled>End current question</button>
     </section>
   </main>
+
+  <footer class="host-footer">
+    <div id="qr-section" class="qr-section hidden">
+      <p class="eyebrow">QR code</p>
+      <div class="footer-qr">
+        <button type="button" class="qr-wrapper" id="qr-trigger">
+          <img id="qr-image" src="" alt="QR code to join the quiz" />
+          <span class="qr-hint">Tap to enlarge</span>
+        </button>
+        <p class="qr-link" id="qr-link"></p>
+      </div>
+    </div>
+    <div class="footer-code">
+      <p class="eyebrow">Quiz code</p>
+      <div id="session-code" class="code muted">Awaiting quiz code...</div>
+      <p id="quiz-meta" class="muted"></p>
+    </div>
+    <div class="footer-duration">
+      <p class="eyebrow">Time setup</p>
+      <div class="inline-input stacked">
+        <input type="number" id="duration-input" min="5" max="300" />
+        <button type="button" id="update-duration" class="ghost">Update</button>
+      </div>
+      <div id="countdown-banner" class="muted"></div>
+    </div>
+  </footer>
 
   <div id="leaderboard-overlay" class="overlay hidden">
     <div class="overlay-card">
@@ -109,6 +126,10 @@
     const endQuestionBtn = document.getElementById('end-question');
     const questionStatus = document.getElementById('question-status');
     const mediaPreview = document.getElementById('media-preview');
+    const stagePrompt = document.getElementById('stage-prompt');
+    const stageMedia = document.getElementById('stage-media');
+    const stageProgress = document.getElementById('stage-progress');
+    const stageTimer = document.getElementById('stage-timer');
     const loopAudio = document.getElementById('loop-audio');
     const sessionCode = document.getElementById('session-code');
     const durationInput = document.getElementById('duration-input');
@@ -173,16 +194,21 @@
       playerCount.textContent = `${players.length} player${players.length === 1 ? '' : 's'}`;
     }
 
-    function showMedia(media) {
-      mediaPreview.innerHTML = '';
+    function renderMedia(container, media) {
+      container.innerHTML = '';
       if (!media) return;
       if (media.type === 'image') {
-        mediaPreview.innerHTML = `<img src="${media.src}" alt="Question media" />`;
+        container.innerHTML = `<img src="${media.src}" alt="Question media" />`;
       } else if (media.type === 'audio') {
-        mediaPreview.innerHTML = `<audio controls src="${media.src}"></audio>`;
+        container.innerHTML = `<audio controls src="${media.src}"></audio>`;
       } else if (media.type === 'video') {
-        mediaPreview.innerHTML = `<video controls src="${media.src}"></video>`;
+        container.innerHTML = `<video controls src="${media.src}"></video>`;
       }
+    }
+
+    function showMedia(media) {
+      renderMedia(mediaPreview, media);
+      renderMedia(stageMedia, media);
     }
 
     claimForm.addEventListener('submit', (event) => {
@@ -206,11 +232,15 @@
       loopAudio.volume = 0.3;
       loopAudio.play().catch(() => {});
       updateQr(id);
+      stagePrompt.textContent = `Ready to run "${title}"`;
+      stageProgress.textContent = 'Waiting to start';
+      stageTimer.textContent = `${questionDuration}s`;
     });
 
     socket.on('host:error', (message) => {
       claimError.textContent = message;
-      sessionCode.textContent = '';
+      sessionCode.textContent = 'Awaiting quiz code...';
+      quizMeta.textContent = '';
     });
 
     socket.on('host:playerJoined', (players) => {
@@ -254,6 +284,9 @@
       endQuestionBtn.disabled = false;
       questionStatus.classList.add('active');
       setTimeout(() => questionStatus.classList.remove('active'), 500);
+      stagePrompt.textContent = prompt;
+      stageProgress.textContent = `Question ${index}/${total}`;
+      stageTimer.textContent = `${duration}s`;
       showMedia(media);
       countdown(duration);
       hideOverlay();
@@ -267,6 +300,10 @@
       questionStatus.classList.remove('active');
       stopTimer();
       mediaPreview.innerHTML = '';
+      stageMedia.innerHTML = '';
+      stageTimer.textContent = '--';
+      stageProgress.textContent = 'Waiting for next question';
+      stagePrompt.textContent = correctAnswer ? `Answer: ${correctAnswer}` : 'Waiting for next question';
     });
 
     socket.on('leaderboard:show', ({ leaderboard, duration }) => {
@@ -280,6 +317,9 @@
       endQuestionBtn.disabled = true;
       stopTimer();
       loopAudio.pause();
+      stagePrompt.textContent = 'Quiz complete!';
+      stageProgress.textContent = 'Finished';
+      stageTimer.textContent = '--';
     });
 
     socket.on('quiz:ended', () => {
@@ -288,6 +328,10 @@
       endQuestionBtn.disabled = true;
       stopTimer();
       mediaPreview.innerHTML = '';
+      stageMedia.innerHTML = '';
+      stagePrompt.textContent = 'Quiz ended. Reclaim control to restart.';
+      stageProgress.textContent = 'Disconnected';
+      stageTimer.textContent = '--';
     });
 
     socket.on('quiz:countdown', ({ seconds }) => {
@@ -297,6 +341,7 @@
     function countdown(seconds) {
       stopTimer();
       let remaining = seconds;
+      stageTimer.textContent = `${remaining}s`;
       timerId = setInterval(() => {
         if (remaining <= 0) {
           stopTimer();
@@ -304,9 +349,12 @@
           startQuestionBtn.disabled = true;
           endQuestionBtn.disabled = true;
           mediaPreview.innerHTML = '';
+          stageMedia.innerHTML = '';
+          stageTimer.textContent = '0s';
           return;
         }
-        questionStatus.textContent = `${remaining}s left...`;
+        questionStatus.textContent = `Time left: ${remaining}s`;
+        stageTimer.textContent = `${remaining}s`;
         remaining -= 1;
       }, 1000);
     }
@@ -316,6 +364,7 @@
         clearInterval(timerId);
         timerId = null;
       }
+      stageTimer.textContent = '--';
     }
 
     function updateMeta(duration) {
