@@ -134,6 +134,30 @@ header {
   margin-bottom: 24px;
 }
 
+.host-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(320px, 420px);
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 16px;
+}
+
+.host-panels {
+  display: grid;
+  gap: 14px;
+  grid-auto-rows: minmax(min-content, max-content);
+}
+
+@media (max-width: 960px) {
+  .host-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .host-panels {
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  }
+}
+
 h1 {
   margin: 0 0 8px;
   font-size: 2.4rem;
@@ -479,7 +503,7 @@ button.ghost {
 }
 
 .host-stage {
-  min-height: clamp(380px, 65vh, 820px);
+  min-height: clamp(420px, 72vh, 900px);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -490,9 +514,20 @@ button.ghost {
   overflow: hidden;
 }
 
+.question-live .host-stage {
+  min-height: clamp(520px, 82vh, 980px);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.host-stage .eyebrow {
+  letter-spacing: 0.28em;
+}
+
 .stage-content h1 {
-  font-size: clamp(1.8rem, 4vw, 3rem);
-  margin: 8px 0 0;
+  font-size: clamp(2.1rem, 5vw, 3.6rem);
+  margin: 12px auto 0;
+  max-width: 900px;
 }
 
 .stage-meta {
@@ -502,6 +537,22 @@ button.ghost {
   align-items: center;
 }
 
+.stage-meta-trailing {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.stage-chip {
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  font-weight: 700;
+  font-size: 0.9rem;
+  letter-spacing: 0.04em;
+}
+
 .stage-timer {
   font-weight: 800;
   font-size: clamp(1.4rem, 4vw, 2.2rem);
@@ -509,7 +560,22 @@ button.ghost {
 }
 
 .stage-media {
-  margin-top: 12px;
+  margin-top: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 160px;
+}
+
+.stage-media img,
+.stage-media video {
+  max-height: 460px;
+  width: auto;
+  max-width: min(86vw, 960px);
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.4);
 }
 
 .host-footer {
