@@ -100,8 +100,13 @@ function similarity(a, b) {
 }
 
 function isCloseMatch(submitted, expected) {
-  const closeness = similarity(submitted, expected);
-  if (closeness >= 0.82) return true;
+  const distance = levenshtein(submitted, expected);
+  const maxLen = Math.max(submitted.length, expected.length) || 1;
+  const closeness = 1 - distance / maxLen;
+
+  if (closeness >= 0.8) return true;
+  if (distance === 1 && Math.min(submitted.length, expected.length) >= 3) return true;
+  if (distance === 2 && maxLen >= 6 && closeness >= 0.7) return true;
 
   if (submitted.length >= 5 && expected.includes(submitted)) return true;
   if (expected.length >= 5 && submitted.includes(expected)) return true;
