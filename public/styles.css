@@ -163,6 +163,61 @@ body.library {
   text-shadow: 0 20px 50px rgba(255, 107, 107, 0.35);
 }
 
+.feedback-toast {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translate(-50%, 24px);
+  background: rgba(11, 16, 33, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 14px;
+  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.4);
+  padding: 14px 18px;
+  max-width: 720px;
+  width: calc(100% - 32px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease, transform 180ms ease;
+  z-index: 20;
+}
+
+.feedback-toast.visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.feedback-content {
+  display: grid;
+  gap: 6px;
+}
+
+.feedback-status {
+  margin: 0;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: #ffd166;
+}
+
+.feedback-prompt {
+  margin: 0;
+  font-weight: 600;
+}
+
+.feedback-line {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  align-items: start;
+  gap: 8px;
+  margin: 0;
+  font-size: 0.98rem;
+  color: #d7e1ef;
+}
+
+.feedback-line span:first-child {
+  color: rgba(255, 255, 255, 0.7);
+  font-weight: 600;
+}
+
 @keyframes flash-fade {
   0% {
     opacity: 0.85;

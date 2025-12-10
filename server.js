@@ -706,6 +706,31 @@ app.get('/api/homework/:homeworkId/leaderboard', (req, res) => {
   res.json(formatHomeworkLeaderboard(session));
 });
 
+app.post('/api/homework/:homeworkId/evaluate', async (req, res) => {
+  const session = findHomeworkSession(req.params.homeworkId);
+  if (!session) {
+    res.status(404).json({ error: 'Homework not found' });
+    return;
+  }
+
+  const questionIndex = Number(req.body?.questionIndex);
+  if (!Number.isInteger(questionIndex) || questionIndex < 0 || questionIndex >= session.questions.length) {
+    res.status(400).json({ error: 'Invalid question index' });
+    return;
+  }
+
+  const question = session.questions[questionIndex];
+  const answer = req.body?.answer ?? '';
+  const evaluation = await evaluateAnswer(question, answer, { includeSpeedBonus: false });
+
+  res.json({
+    isCorrect: evaluation.isCorrect,
+    isPartial: evaluation.isPartial,
+    correctAnswer: evaluation.correctAnswer,
+    playerAnswer: evaluation.playerAnswer,
+  });
+});
+
 app.post('/api/homework/:homeworkId/submit', async (req, res) => {
   const session = findHomeworkSession(req.params.homeworkId);
   if (!session) {
