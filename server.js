@@ -27,7 +27,9 @@ const generateAssignmentCode = customAlphabet('ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 const synonymCache = new Map();
 
 function normalizeAssignmentId(id) {
-  return id?.trim()?.toUpperCase() || null;
+  const cleaned = id?.replace(/[^0-9a-z]/gi, '').trim();
+  if (!cleaned) return null;
+  return cleaned.toUpperCase();
 }
 
 function getAssignmentById(id) {
@@ -988,7 +990,11 @@ app.get('/api/quizzes', (_req, res) => {
   res.json(payload);
 });
 
-server.listen(PORT, HOST, () => {
-  /* eslint-disable no-console */
-  console.log(`Quiz server listening on http://${HOST}:${PORT}`);
-});
+if (process.env.NODE_ENV !== 'test') {
+  server.listen(PORT, HOST, () => {
+    /* eslint-disable no-console */
+    console.log(`Quiz server listening on http://${HOST}:${PORT}`);
+  });
+}
+
+export { app, server, normalizeAssignmentId, getAssignmentById, assignments };
