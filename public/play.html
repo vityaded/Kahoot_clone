@@ -65,37 +65,14 @@
   <div id="answer-indicator" class="answer-indicator hidden" aria-live="assertive" aria-atomic="true"></div>
 
   <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/player-shared.js"></script>
   <script>
     const socket = io();
-    const lobbyStatus = document.getElementById('lobby-status');
-    const joinError = document.getElementById('join-error');
-    const questionText = document.getElementById('question-text');
-    const questionContent = document.querySelector('.question-content');
-    const timerEl = document.getElementById('timer');
-    const answerForm = document.getElementById('answer-form');
-    const answerInput = document.getElementById('answer-input');
-    const submitButton = answerForm.querySelector('button');
-    const answerFeedback = document.getElementById('answer-feedback');
-    const leaderboard = document.getElementById('leaderboard');
-    const questionMedia = document.getElementById('question-media');
-    const questionProgress = document.getElementById('question-progress');
-    const overlay = document.getElementById('leaderboard-overlay');
-    const overlayList = document.getElementById('overlay-leaderboard');
-    const overlayHint = document.getElementById('overlay-hint');
-    const leaderboardCard = document.getElementById('leaderboard-card');
-    const correctAnswerDisplay = document.getElementById('correct-answer-display');
-    const playerAnswerDisplay = document.getElementById('player-answer-display');
-    const questionBoard = document.querySelector('.question-board');
-    const answerIndicator = document.getElementById('answer-indicator');
+    const playerView = new PlayerView({
+      onSubmit: handleAnswerSubmit,
+    });
 
-    function applyAnswerInputSafeguards() {
-      answerForm.setAttribute('autocomplete', 'off');
-      answerInput.setAttribute('name', 'response-field');
-      answerInput.setAttribute('autocomplete', 'new-password');
-      answerInput.setAttribute('autocapitalize', 'off');
-      answerInput.setAttribute('autocorrect', 'off');
-      answerInput.setAttribute('spellcheck', 'false');
-    }
+    const { answerForm, answerInput } = playerView.el;
 
     const playerIdFromStorage = localStorage.getItem('playerId');
     let storedPlayerId = playerIdFromStorage;
@@ -113,13 +90,23 @@
     }
 
     let currentQuizId = null;
-    let timerInterval = null;
-    let lobbyCountdown = null;
     let hasJoinedOnce = Boolean(playerIdFromStorage);
-    let inputEngaged = false;
-    let baseViewportHeight = window.visualViewport?.height || window.innerHeight;
     let lastSubmittedAnswer = '';
     let playerHasAnswered = false;
+
+    function handleAnswerSubmit(trimmedAnswer) {
+      if (!currentQuizId) {
+        playerView.setAnswerWaiting(false);
+        return;
+      }
+      socket.emit('player:answer', {
+        quizId: currentQuizId,
+        answer: trimmedAnswer,
+      });
+      lastSubmittedAnswer = trimmedAnswer;
+      playerHasAnswered = true;
+      playerView.setAnswerFeedback('');
+    }
 
     function joinQuiz(message = 'Joining game...') {
       storedName = localStorage.getItem('playerName');
@@ -130,7 +117,7 @@
         return;
       }
 
-      lobbyStatus.textContent = message;
+      playerView.setStatus(message);
       socket.emit('player:join', {
         quizId: storedQuiz,
         name: storedName,
@@ -139,7 +126,7 @@
     }
 
     function attemptReconnect() {
-      lobbyStatus.textContent = 'Reconnecting to the game...';
+      playerView.setStatus('Reconnecting to the game...');
       socket.emit('player:reconnect', { playerId: storedPlayerId, quizId: storedQuiz });
     }
 
@@ -162,15 +149,15 @@
         storedQuiz = quizId;
         localStorage.setItem('quizCode', quizId);
       }
-      joinError.textContent = '';
-      lobbyStatus.textContent = `Joined "${title}". Waiting for the first question...`;
-      answerFeedback.textContent = '';
+      playerView.setError('');
+      playerView.setStatus(`Joined "${title}". Waiting for the first question...`);
+      playerView.setAnswerFeedback('');
     });
 
     socket.on('player:reconnected', ({ quizId, title, playerId, name }) => {
       currentQuizId = quizId;
-      joinError.textContent = '';
-      lobbyStatus.textContent = `Reconnected to "${title}". Restoring your spot...`;
+      playerView.setError('');
+      playerView.setStatus(`Reconnected to "${title}". Restoring your spot...`);
       storedPlayerId = playerId;
       storedName = name || storedName;
       storedQuiz = quizId;
@@ -189,371 +176,101 @@
     });
 
     socket.on('player:error', (message) => {
-      joinError.textContent = message;
-      lobbyStatus.textContent = 'Unable to join. Please re-enter the code and nickname.';
+      playerView.setError(message);
+      playerView.setStatus('Unable to join. Please re-enter the code and nickname.');
     });
 
     socket.on('question:start', ({ prompt, index, total, duration, media }) => {
-      questionProgress.textContent = `Question ${index} of ${total}`;
-      questionText.textContent = prompt;
-      answerFeedback.textContent = '';
-      answerFeedback.className = '';
-      showCorrectAnswer('');
-      showPlayerAnswer('');
-      lobbyStatus.textContent = '';
-      resetInputEngagement();
-      applyAnswerInputSafeguards();
-      answerForm.classList.remove('hidden');
-      setAnswerWaiting(false);
-      answerInput.value = '';
       lastSubmittedAnswer = '';
       playerHasAnswered = false;
-      renderMedia(media);
-      startTimer(duration);
-      hideOverlay();
-      stopLobbyCountdown();
-      toggleLeaderboard(false);
+      playerView.startQuestion({ prompt, index, total, duration, media });
     });
 
     socket.on('question:end', ({ correctAnswer }) => {
-      stopTimer();
-      showCorrectAnswer(`Correct answer: ${correctAnswer}`);
-      const answerText = playerHasAnswered && lastSubmittedAnswer ? lastSubmittedAnswer : 'No answer submitted';
-      showPlayerAnswer(`Your answer: ${answerText}`);
-      answerForm.classList.add('hidden');
-      setAnswerWaiting(false);
-      resetInputEngagement();
-      questionMedia.innerHTML = '';
-      timerEl.textContent = 'Time!';
-      toggleLeaderboard(false);
+      playerView.endQuestion({ correctAnswer, playerAnswer: lastSubmittedAnswer });
     });
 
     socket.on('leaderboard:show', ({ leaderboard: board, duration }) => {
-      hideOverlay();
+      playerView.hideOverlay();
     });
 
     socket.on('quiz:finished', () => {
-      stopTimer();
-      questionProgress.textContent = 'Quiz finished';
-      questionText.textContent = 'Quiz finished! Check the leaderboard for final scores.';
+      playerView.stopTimer();
+      playerView.setQuestionProgress('Quiz finished');
+      playerView.setQuestionText('Quiz finished! Check the leaderboard for final scores.');
       answerForm.classList.add('hidden');
-      setAnswerWaiting(false);
-      resetInputEngagement();
-      questionMedia.innerHTML = '';
-      timerEl.textContent = '--';
-      toggleLeaderboard(false);
+      playerView.setAnswerWaiting(false);
+      playerView.resetInputEngagement();
+      playerView.renderMedia(null);
+      if (playerView.el.timer) playerView.el.timer.textContent = '--';
+      playerView.toggleLeaderboard(false);
     });
 
     socket.on('quiz:ended', () => {
-      stopTimer();
-      questionProgress.textContent = 'Quiz closed';
-      questionText.textContent = 'The host left the game. Quiz closed.';
+      playerView.stopTimer();
+      playerView.setQuestionProgress('Quiz closed');
+      playerView.setQuestionText('The host left the game. Quiz closed.');
       answerForm.classList.add('hidden');
-      setAnswerWaiting(false);
-      resetInputEngagement();
-      questionMedia.innerHTML = '';
-      timerEl.textContent = '--';
-      toggleLeaderboard(false);
+      playerView.setAnswerWaiting(false);
+      playerView.resetInputEngagement();
+      playerView.renderMedia(null);
+      if (playerView.el.timer) playerView.el.timer.textContent = '--';
+      playerView.toggleLeaderboard(false);
     });
 
     socket.on('player:answerResult', ({ correct, partial, earned, correctAnswer, playerAnswer }) => {
-      if (correct) {
-        answerFeedback.textContent = `Correct! +${earned} points`;
-        answerFeedback.className = 'success';
-        showAnswerIndicator('correct');
-      } else if (partial) {
-        answerFeedback.textContent = `Almost! +${earned} points`;
-        answerFeedback.className = 'warning';
-        showAnswerIndicator('partial');
-      } else {
-        answerFeedback.textContent = 'Incorrect';
-        answerFeedback.className = 'error';
-        showAnswerIndicator('incorrect');
-      }
-      showCorrectAnswer(`Correct answer: ${correctAnswer}`);
-      lastSubmittedAnswer = playerAnswer ?? lastSubmittedAnswer;
-      const answerText = lastSubmittedAnswer || 'No answer submitted';
-      showPlayerAnswer(`Your answer: ${answerText}`);
+      playerView.showAnswerResult({ correct, partial, earned, correctAnswer, playerAnswer });
+      lastSubmittedAnswer = playerView.lastSubmittedAnswer;
       playerHasAnswered = true;
-      resetInputEngagement();
-      answerForm.classList.add('hidden');
-      setAnswerWaiting(false);
     });
 
     socket.on('leaderboard:update', (players) => {
-      renderLeaderboard(players);
+      playerView.renderLeaderboard(players);
     });
 
     socket.on('player:state', ({ questionActive, question, timeRemaining, leaderboard: board, hasAnswered }) => {
-      renderLeaderboard(board);
+      playerView.renderLeaderboard(board);
 
       if (questionActive && question) {
-        questionProgress.textContent = `Question ${question.index} of ${question.total}`;
-        questionText.textContent = question.prompt;
-        renderMedia(question.media);
-        hideOverlay();
-        stopLobbyCountdown();
-        lobbyStatus.textContent = '';
-        setAnswerWaiting(hasAnswered);
+        playerView.setQuestionProgress(`Question ${question.index} of ${question.total}`);
+        playerView.setQuestionText(question.prompt);
+        playerView.renderMedia(question.media);
+        playerView.hideOverlay();
+        playerView.stopLobbyCountdown();
+        playerView.setStatus('');
+        playerView.setAnswerWaiting(hasAnswered);
         playerHasAnswered = hasAnswered;
         if (hasAnswered) {
           answerForm.classList.add('hidden');
-          answerFeedback.textContent = '';
-          answerFeedback.className = '';
+          playerView.setAnswerFeedback('');
         } else {
           answerForm.classList.remove('hidden');
-          resetInputEngagement();
+          playerView.resetInputEngagement();
           answerInput.value = '';
-          answerFeedback.textContent = '';
-          answerFeedback.className = '';
+          playerView.setAnswerFeedback('');
         }
         const remaining = timeRemaining ?? question.duration;
-        startTimer(remaining);
-        toggleLeaderboard(false);
+        playerView.startTimer(remaining);
+        playerView.toggleLeaderboard(false);
       } else {
-        stopTimer();
-        timerEl.textContent = '--';
-        questionProgress.textContent = 'Waiting for host...';
-        questionText.textContent = 'Waiting for the host to start...';
+        playerView.stopTimer();
+        if (playerView.el.timer) playerView.el.timer.textContent = '--';
+        playerView.setQuestionProgress('Waiting for host...');
+        playerView.setQuestionText('Waiting for the host to start...');
         answerForm.classList.add('hidden');
-        setAnswerWaiting(false);
-        resetInputEngagement();
-        answerFeedback.textContent = '';
-        answerFeedback.className = '';
-        showCorrectAnswer('');
-        showPlayerAnswer('');
-        questionMedia.innerHTML = '';
-        toggleLeaderboard(false);
+        playerView.setAnswerWaiting(false);
+        playerView.resetInputEngagement();
+        playerView.setAnswerFeedback('');
+        playerView.showCorrectAnswer('');
+        playerView.showPlayerAnswer('');
+        playerView.renderMedia(null);
+        playerView.toggleLeaderboard(false);
       }
     });
 
     socket.on('quiz:countdown', ({ seconds }) => {
-      startLobbyCountdown(seconds);
+      playerView.startLobbyCountdown(seconds);
     });
-
-    function handleImmediateSubmit(event) {
-      if (!answerForm.requestSubmit || submitButton.disabled) return;
-      if (!currentQuizId) return;
-      const trimmedAnswer = answerInput.value.trim();
-      if (!trimmedAnswer) return;
-
-      event.preventDefault();
-      answerForm.requestSubmit();
-    }
-
-    answerForm.addEventListener('submit', (event) => {
-      event.preventDefault();
-      if (!currentQuizId) return;
-      const trimmedAnswer = answerInput.value.trim();
-      if (!trimmedAnswer) return;
-      setAnswerWaiting(true);
-      socket.emit('player:answer', {
-        quizId: currentQuizId,
-        answer: trimmedAnswer,
-      });
-      lastSubmittedAnswer = trimmedAnswer;
-      playerHasAnswered = true;
-      answerFeedback.textContent = '';
-      answerFeedback.className = '';
-    });
-
-    submitButton.addEventListener('pointerdown', handleImmediateSubmit);
-    submitButton.addEventListener('touchstart', handleImmediateSubmit);
-
-    answerInput.addEventListener('focus', handleInputFocus);
-    answerInput.addEventListener('blur', handleInputBlur);
-
-    if (window.visualViewport) {
-      window.visualViewport.addEventListener('resize', () => {
-        if (!inputEngaged) {
-          baseViewportHeight = Math.max(baseViewportHeight, window.visualViewport.height);
-          return;
-        }
-
-        const heightLoss = baseViewportHeight - window.visualViewport.height;
-        if (heightLoss > 120) {
-          window.requestAnimationFrame(adjustQuestionPosition);
-        }
-      });
-    }
-
-    window.addEventListener('resize', () => {
-      if (!inputEngaged) {
-        baseViewportHeight = Math.max(baseViewportHeight, window.innerHeight);
-        return;
-      }
-
-      window.requestAnimationFrame(adjustQuestionPosition);
-    });
-
-    function showCorrectAnswer(text) {
-      correctAnswerDisplay.textContent = text;
-      correctAnswerDisplay.classList.toggle('visible', Boolean(text));
-    }
-
-    function showPlayerAnswer(text) {
-      playerAnswerDisplay.textContent = text;
-      playerAnswerDisplay.classList.toggle('visible', Boolean(text));
-    }
-
-    function showAnswerIndicator(status) {
-      let label = '✕';
-      if (status === 'correct') label = '✓';
-      if (status === 'partial') label = 'OK';
-
-      answerIndicator.textContent = label;
-      answerIndicator.classList.remove('hidden', 'correct', 'incorrect', 'partial');
-      const className = status === 'correct' ? 'correct' : status === 'partial' ? 'partial' : 'incorrect';
-      answerIndicator.classList.add(className);
-      answerIndicator.classList.add('visible');
-      setTimeout(() => {
-        answerIndicator.classList.remove('visible');
-        answerIndicator.classList.add('hidden');
-      }, 1400);
-    }
-
-    function setAnswerWaiting(isWaiting) {
-      answerInput.disabled = isWaiting;
-      submitButton.disabled = isWaiting;
-    }
-
-    function handleInputFocus() {
-      inputEngaged = true;
-      document.body.classList.add('input-engaged');
-      waitForKeyboardAndAdjust();
-    }
-
-    function handleInputBlur() {
-      resetInputEngagement();
-    }
-
-    function resetInputEngagement() {
-      inputEngaged = false;
-      document.body.classList.remove('input-engaged');
-      resetQuestionShift();
-    }
-
-    function waitForKeyboardAndAdjust(attempt = 0) {
-      if (!inputEngaged) return;
-
-      const viewportHeight = window.visualViewport?.height || window.innerHeight;
-      const heightLoss = baseViewportHeight - viewportHeight;
-      const keyboardLikelyOpen = heightLoss > 120;
-
-      if (keyboardLikelyOpen) {
-        window.requestAnimationFrame(adjustQuestionPosition);
-        return;
-      }
-
-      if (attempt < 6) {
-        setTimeout(() => waitForKeyboardAndAdjust(attempt + 1), 80);
-      } else {
-        window.requestAnimationFrame(adjustQuestionPosition);
-      }
-    }
-
-    function adjustQuestionPosition() {
-      if (!questionBoard || !questionContent || !answerInput) return;
-      const questionRect = questionContent.getBoundingClientRect();
-      const inputRect = answerInput.getBoundingClientRect();
-      const desiredGap = 12;
-      const rawShift = inputRect.top - questionRect.bottom - desiredGap;
-      const boardRect = questionBoard.getBoundingClientRect();
-      const maxShift = Math.max(0, boardRect.bottom - questionRect.bottom - 8);
-      const safeShift = Math.min(Math.max(rawShift, 0), maxShift);
-
-      if (safeShift > 2) {
-        questionBoard.style.setProperty('--question-shift', `${safeShift}px`);
-        questionBoard.classList.add('question-shifted');
-      } else {
-        resetQuestionShift();
-      }
-    }
-
-    function resetQuestionShift() {
-      questionBoard?.style.removeProperty('--question-shift');
-      questionBoard?.classList.remove('question-shifted');
-    }
-
-    function startTimer(seconds) {
-      stopTimer();
-      let remaining = Math.round(seconds);
-      if (!Number.isFinite(remaining) || remaining <= 0) {
-        timerEl.textContent = 'Time!';
-        return;
-      }
-      timerEl.textContent = `${remaining}s`;
-      timerInterval = setInterval(() => {
-        remaining -= 1;
-        if (remaining <= 0) {
-          timerEl.textContent = 'Time!';
-          stopTimer();
-          return;
-        }
-        timerEl.textContent = `${remaining}s`;
-      }, 1000);
-    }
-
-    function stopTimer() {
-      if (timerInterval) {
-        clearInterval(timerInterval);
-        timerInterval = null;
-      }
-    }
-
-    function renderLeaderboard(players) {
-      leaderboard.innerHTML = '';
-      if (!Array.isArray(players)) return;
-      players.forEach((player, index) => {
-        const li = document.createElement('li');
-        const accuracy = Number.isFinite(player.accuracy) ? player.accuracy : 0;
-        li.innerHTML = `<span>${index + 1}. ${player.name}</span><span>${player.score} pts · ${accuracy}% correct</span>`;
-        leaderboard.appendChild(li);
-      });
-    }
-
-    function renderMedia(media) {
-      questionMedia.innerHTML = '';
-      if (!media) return;
-      if (media.type === 'image') {
-        questionMedia.innerHTML = `<img src="${media.src}" alt="Question media" />`;
-      } else if (media.type === 'audio') {
-        questionMedia.innerHTML = `<audio controls src="${media.src}"></audio>`;
-      } else if (media.type === 'video') {
-        questionMedia.innerHTML = `<video controls src="${media.src}"></video>`;
-      }
-    }
-
-    function hideOverlay() {
-      overlay.classList.add('hidden');
-      overlayList.innerHTML = '';
-    }
-
-    function toggleLeaderboard(show) {
-      leaderboardCard.classList.add('hidden');
-    }
-
-    function startLobbyCountdown(seconds) {
-      stopLobbyCountdown();
-      let remaining = seconds;
-      lobbyStatus.textContent = `Game starting in ${remaining}s...`;
-      lobbyCountdown = setInterval(() => {
-        remaining -= 1;
-        lobbyStatus.textContent = `Game starting in ${Math.max(remaining, 0)}s...`;
-        if (remaining <= 0) {
-          stopLobbyCountdown();
-        }
-      }, 1000);
-    }
-
-    function stopLobbyCountdown() {
-      if (lobbyCountdown) {
-        clearInterval(lobbyCountdown);
-        lobbyCountdown = null;
-      }
-      lobbyStatus.textContent = '';
-    }
-
   </script>
 </body>
 </html>
