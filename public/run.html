@@ -220,7 +220,8 @@
       leaderboardList.innerHTML = '';
       players.forEach((player, index) => {
         const item = document.createElement('li');
-        item.innerHTML = `<span>${index + 1}. ${player.name}</span><span>${player.score} pts</span>`;
+        const accuracy = Number.isFinite(player.accuracy) ? player.accuracy : 0;
+        item.innerHTML = `<span>${index + 1}. ${player.name}</span><span>${player.score} pts · ${accuracy}% correct</span>`;
         leaderboardList.appendChild(item);
       });
       playerCount.textContent = `${players.length} player${players.length === 1 ? '' : 's'}`;
@@ -416,14 +417,15 @@
     }
 
     function updateMeta(duration) {
-      quizMeta.textContent = `${quizTitle} · ${totalQuestions} question(s) · ${duration}s each`;
+      quizMeta.textContent = `${quizTitle} · ${totalQuestions} question(s) · Adaptive timing (base ${duration}s + 10s every 2 words)`;
     }
 
     function renderOverlay(players, duration) {
       overlayList.innerHTML = '';
       players.forEach((player, index) => {
         const item = document.createElement('li');
-        item.innerHTML = `<span>${index + 1}. ${player.name}</span><span>${player.score} pts</span>`;
+        const accuracy = Number.isFinite(player.accuracy) ? player.accuracy : 0;
+        item.innerHTML = `<span>${index + 1}. ${player.name}</span><span>${player.score} pts · ${accuracy}% correct</span>`;
         overlayList.appendChild(item);
       });
       overlay.classList.remove('hidden');
