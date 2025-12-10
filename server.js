@@ -7,6 +7,7 @@ import path from 'path';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const DATA_FILE = path.join(DATA_DIR, 'quizzes.json');
+const ASSIGNMENTS_FILE = path.join(DATA_DIR, 'assignments.json');
 
 const app = express();
 const server = http.createServer(app);
@@ -18,10 +19,14 @@ const QUIZ_ROOM_PREFIX = 'quiz-';
 const DISCONNECT_GRACE_MS = 10000;
 
 const quizTemplates = new Map();
+const assignments = new Map();
 const sessions = new Map();
 const playerSessions = new Map();
 const generateQuizCode = customAlphabet('0123456789', 6);
+const generateAssignmentCode = customAlphabet('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', 8);
 const synonymCache = new Map();
+
+app.use(express.json());
 
 function serializeForStorage() {
   return Array.from(quizTemplates.values()).map((quiz) => ({
@@ -50,6 +55,37 @@ async function loadPersistedQuizzes() {
     if (error.code !== 'ENOENT') {
       /* eslint-disable no-console */
       console.error('Failed to load quizzes from disk', error);
+    }
+  }
+}
+
+function serializeAssignmentsForStorage() {
+  return Array.from(assignments.values()).map((assignment) => ({
+    ...assignment,
+    submissions: assignment.submissions || [],
+  }));
+}
+
+async function persistAssignments() {
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  const payload = JSON.stringify(serializeAssignmentsForStorage());
+  await fs.writeFile(ASSIGNMENTS_FILE, payload, 'utf8');
+}
+
+async function loadPersistedAssignments() {
+  try {
+    const file = await fs.readFile(ASSIGNMENTS_FILE, 'utf8');
+    const stored = JSON.parse(file);
+    stored.forEach((assignment) => {
+      assignments.set(assignment.id, {
+        ...assignment,
+        submissions: assignment.submissions || [],
+      });
+    });
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      /* eslint-disable no-console */
+      console.error('Failed to load assignments from disk', error);
     }
   }
 }
@@ -146,10 +182,98 @@ async function fetchSynonyms(word) {
   }
 }
 
+async function scoreAssignmentSubmission(assignment, answers = []) {
+  let score = 0;
+  let correctCount = 0;
+  let partialCount = 0;
+
+  // Normalize answers length to question count
+  const submitted = assignment.questions.map((_, index) => normalise(answers[index] || ''));
+
+  /* eslint-disable no-await-in-loop */
+  for (let i = 0; i < assignment.questions.length; i += 1) {
+    const question = assignment.questions[i];
+    const normalizedExpected = [
+      question.answer,
+      ...(Array.isArray(question.alternateAnswers) ? question.alternateAnswers : []),
+    ]
+      .map(normalise)
+      .filter(Boolean);
+    const normalizedPartial = (question.partialAnswers || []).map(normalise).filter(Boolean);
+
+    const synonyms = Array.from(
+      new Set(
+        (
+          await Promise.all(normalizedExpected.map((expected) => fetchSynonyms(expected)))
+        )
+          .flat()
+          .filter(Boolean),
+      ),
+    );
+
+    const submission = submitted[i];
+    const isCorrect = normalizedExpected.includes(submission);
+    const isPartial =
+      !isCorrect &&
+      (normalizedPartial.includes(submission) ||
+        synonyms.includes(submission) ||
+        synonyms.some((syn) => isCloseMatch(submission, syn)) ||
+        normalizedExpected.some((expected) => isCloseMatch(submission, expected)));
+
+    if (isCorrect) {
+      score += 1000;
+      correctCount += 1;
+    } else if (isPartial) {
+      score += 500;
+      partialCount += 1;
+    }
+  }
+  /* eslint-enable no-await-in-loop */
+
+  const fraction = (correctCount + partialCount * 0.5) / (assignment.questions.length || 1);
+
+  return {
+    score,
+    correctCount,
+    partialCount,
+    percent: Math.round(fraction * 100),
+  };
+}
+
 function formatLeaderboard(session) {
   return Array.from(session.players.values())
     .sort((a, b) => b.score - a.score)
     .map(({ name, score }) => ({ name, score }));
+}
+
+function createAssignmentFromQuiz(quizId, assignmentTitle = '') {
+  const template = quizTemplates.get(quizId);
+  if (!template) return null;
+
+  const assignment = {
+    id: generateAssignmentCode(),
+    quizId: template.id,
+    quizTitle: template.title,
+    assignmentTitle: assignmentTitle?.trim() || `${template.title} homework`,
+    createdAt: Date.now(),
+    questions: template.questions,
+    submissions: [],
+  };
+
+  assignments.set(assignment.id, assignment);
+  return assignment;
+}
+
+function summariseAssignment(assignment) {
+  return {
+    id: assignment.id,
+    quizId: assignment.quizId,
+    quizTitle: assignment.quizTitle,
+    assignmentTitle: assignment.assignmentTitle,
+    createdAt: assignment.createdAt,
+    submissionCount: assignment.submissions.length,
+    questionCount: assignment.questions.length,
+  };
 }
 
 function emitLeaderboard(sessionId) {
@@ -326,6 +450,7 @@ function endQuestion(sessionId, { fastForward = false } = {}) {
 }
 
 await loadPersistedQuizzes();
+await loadPersistedAssignments();
 
 io.on('connection', (socket) => {
   socket.on('host:createQuiz', ({ title, questions, questionDuration }) => {
@@ -642,6 +767,145 @@ app.use(express.static('public'));
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });
+});
+
+app.get('/api/quizzes/:quizId', (req, res) => {
+  const quizId = req.params.quizId?.trim()?.toUpperCase();
+  const quiz = quizTemplates.get(quizId);
+  if (!quiz) {
+    res.status(404).json({ error: 'Quiz not found' });
+    return;
+  }
+
+  res.json({
+    id: quiz.id,
+    title: quiz.title,
+    questionCount: quiz.questions.length,
+    createdAt: quiz.createdAt,
+  });
+});
+
+app.post('/api/quizzes/:quizId/assignments', (req, res) => {
+  const quizId = req.params.quizId?.trim()?.toUpperCase();
+  if (!quizTemplates.has(quizId)) {
+    res.status(404).json({ error: 'Quiz not found' });
+    return;
+  }
+
+  const assignment = createAssignmentFromQuiz(quizId, req.body?.title);
+  persistAssignments().catch((error) => {
+    /* eslint-disable no-console */
+    console.error('Failed to persist assignments', error);
+  });
+
+  res.status(201).json(summariseAssignment(assignment));
+});
+
+app.get('/api/quizzes/:quizId/assignments', (req, res) => {
+  const quizId = req.params.quizId?.trim()?.toUpperCase();
+  if (!quizTemplates.has(quizId)) {
+    res.status(404).json({ error: 'Quiz not found' });
+    return;
+  }
+
+  const payload = Array.from(assignments.values())
+    .filter((assignment) => assignment.quizId === quizId)
+    .map(summariseAssignment)
+    .sort((a, b) => b.createdAt - a.createdAt);
+
+  res.json(payload);
+});
+
+app.get('/api/assignments/:assignmentId', (req, res) => {
+  const assignment = assignments.get(req.params.assignmentId);
+  if (!assignment) {
+    res.status(404).json({ error: 'Assignment not found' });
+    return;
+  }
+
+  const submissions = (assignment.submissions || [])
+    .map((submission) => ({
+      id: submission.id,
+      playerName: submission.playerName,
+      score: submission.score,
+      percent: submission.percent,
+      correct: submission.correct,
+      partial: submission.partial,
+      totalQuestions: submission.totalQuestions,
+      submittedAt: submission.submittedAt,
+    }))
+    .sort((a, b) => b.submittedAt - a.submittedAt);
+
+  res.json({
+    ...summariseAssignment(assignment),
+    submissions,
+  });
+});
+
+app.get('/api/assignments/:assignmentId/take', (req, res) => {
+  const assignment = assignments.get(req.params.assignmentId);
+  if (!assignment) {
+    res.status(404).json({ error: 'Assignment not found' });
+    return;
+  }
+
+  res.json({
+    id: assignment.id,
+    quizId: assignment.quizId,
+    quizTitle: assignment.quizTitle,
+    assignmentTitle: assignment.assignmentTitle,
+    createdAt: assignment.createdAt,
+    questions: assignment.questions.map((question) => ({
+      prompt: question.prompt,
+      media: question.media,
+    })),
+  });
+});
+
+app.post('/api/assignments/:assignmentId/submit', async (req, res) => {
+  const assignment = assignments.get(req.params.assignmentId);
+  if (!assignment) {
+    res.status(404).json({ error: 'Assignment not found' });
+    return;
+  }
+
+  const playerName = req.body?.name?.trim();
+  if (!playerName) {
+    res.status(400).json({ error: 'Please provide your name.' });
+    return;
+  }
+
+  const answers = Array.isArray(req.body?.answers) ? req.body.answers : [];
+  const result = await scoreAssignmentSubmission(assignment, answers);
+  const submission = {
+    id: nanoid(8),
+    playerName,
+    score: result.score,
+    percent: result.percent,
+    correct: result.correctCount,
+    partial: result.partialCount,
+    totalQuestions: assignment.questions.length,
+    submittedAt: Date.now(),
+  };
+
+  const existingIndex = assignment.submissions.findIndex(
+    (entry) => normalise(entry.playerName) === normalise(playerName),
+  );
+  if (existingIndex >= 0) {
+    assignment.submissions.splice(existingIndex, 1, submission);
+  } else {
+    assignment.submissions.push(submission);
+  }
+
+  persistAssignments().catch((error) => {
+    /* eslint-disable no-console */
+    console.error('Failed to persist assignments', error);
+  });
+
+  res.json({
+    submission,
+    message: 'Submission recorded',
+  });
 });
 
 app.get('/api/quizzes', (_req, res) => {

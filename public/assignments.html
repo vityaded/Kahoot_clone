@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+  <title>Homework assignments</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="library">
+  <div class="glow"></div>
+  <header class="hero">
+    <div>
+      <p class="eyebrow">Assignments</p>
+      <h1 id="quiz-heading">Assignments for this quiz</h1>
+      <p class="lede">Create homework from an existing quiz, copy the share link, and track learner scores and accuracy.</p>
+      <div class="cta-row">
+        <a class="button ghost" href="/">Back to library</a>
+        <a class="button ghost" id="run-link" href="/run.html">Run live instead</a>
+      </div>
+    </div>
+    <div class="hero-card">
+      <h2>How it works</h2>
+      <ol>
+        <li>Create an assignment to generate a shareable link.</li>
+        <li>Learners open the homework link and submit answers in their own time.</li>
+        <li>Return here to review points and correctness for each submission.</li>
+      </ol>
+    </div>
+  </header>
+
+  <main class="library-grid">
+    <section class="card">
+      <div class="card-heading">
+        <div>
+          <p class="eyebrow">Homework list</p>
+          <h2 id="list-title">Assignments</h2>
+          <p class="muted" id="list-subtitle">Loading quiz details...</p>
+        </div>
+        <button type="button" id="create-assignment" class="ghost">New assignment</button>
+      </div>
+      <ul id="assignment-list" class="quiz-list"></ul>
+      <p id="assignment-empty" class="muted">No assignments yet. Create one to share with learners.</p>
+    </section>
+
+    <section class="card" id="assignment-detail">
+      <div class="card-heading">
+        <div>
+          <p class="eyebrow">Selected assignment</p>
+          <h2 id="detail-title">Pick an assignment to see results</h2>
+          <p class="muted" id="detail-subtitle">Select an assignment from the list to load responses.</p>
+        </div>
+      </div>
+      <div id="detail-body" class="stacked" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const quizId = params.get('quizId')?.trim()?.toUpperCase();
+
+    const quizHeading = document.getElementById('quiz-heading');
+    const listTitle = document.getElementById('list-title');
+    const listSubtitle = document.getElementById('list-subtitle');
+    const assignmentList = document.getElementById('assignment-list');
+    const assignmentEmpty = document.getElementById('assignment-empty');
+    const createBtn = document.getElementById('create-assignment');
+    const detailTitle = document.getElementById('detail-title');
+    const detailSubtitle = document.getElementById('detail-subtitle');
+    const detailBody = document.getElementById('detail-body');
+    const runLink = document.getElementById('run-link');
+
+    if (!quizId) {
+      listSubtitle.textContent = 'Add ?quizId=CODE to the URL to manage assignments for a quiz.';
+      createBtn.disabled = true;
+    }
+
+    function formatDate(timestamp) {
+      const date = new Date(timestamp);
+      return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    }
+
+    function buildShareLink(assignmentId) {
+      const url = new URL(window.location.origin + '/homework.html');
+      url.searchParams.set('assignmentId', assignmentId);
+      return url.toString();
+    }
+
+    async function loadQuiz() {
+      if (!quizId) return;
+      try {
+        const response = await fetch(`/api/quizzes/${quizId}`);
+        if (!response.ok) throw new Error('Quiz not found');
+        const quiz = await response.json();
+        quizHeading.textContent = `Assignments for ${quiz.title} (${quiz.id})`;
+        listTitle.textContent = `${quiz.title} assignments`;
+        listSubtitle.textContent = `${quiz.questionCount} question${quiz.questionCount === 1 ? '' : 's'} · Created ${formatDate(quiz.createdAt)}`;
+        runLink.href = `/run.html?quizId=${quiz.id}`;
+      } catch (_error) {
+        listSubtitle.textContent = 'Unable to load quiz details.';
+        createBtn.disabled = true;
+      }
+    }
+
+    function renderAssignments(list) {
+      assignmentList.innerHTML = '';
+      if (!list.length) {
+        assignmentEmpty.style.display = 'block';
+        return;
+      }
+      assignmentEmpty.style.display = 'none';
+      list.forEach((assignment) => {
+        const item = document.createElement('li');
+        item.className = 'quiz-row';
+        item.innerHTML = `
+          <div>
+            <p class="eyebrow">${assignment.id}</p>
+            <h3>${assignment.assignmentTitle}</h3>
+            <p class="muted">${assignment.questionCount} question${assignment.questionCount === 1 ? '' : 's'} · Created ${formatDate(assignment.createdAt)}</p>
+          </div>
+          <div class="quiz-actions">
+            <button class="button ghost" data-assignment="${assignment.id}">View</button>
+            <button class="copy" data-share="${assignment.id}">Copy link</button>
+          </div>
+        `;
+        assignmentList.appendChild(item);
+      });
+
+      assignmentList.querySelectorAll('[data-assignment]').forEach((btn) => {
+        btn.addEventListener('click', () => loadAssignmentDetail(btn.dataset.assignment));
+      });
+
+      assignmentList.querySelectorAll('[data-share]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const link = buildShareLink(btn.dataset.share);
+          navigator.clipboard.writeText(link);
+          btn.textContent = 'Copied!';
+          setTimeout(() => { btn.textContent = 'Copy link'; }, 1200);
+        });
+      });
+    }
+
+    async function loadAssignments() {
+      if (!quizId) return;
+      try {
+        const response = await fetch(`/api/quizzes/${quizId}/assignments`);
+        if (!response.ok) throw new Error('Failed to load');
+        const data = await response.json();
+        renderAssignments(data);
+      } catch (_error) {
+        assignmentEmpty.textContent = 'Unable to load assignments right now.';
+        assignmentEmpty.style.display = 'block';
+      }
+    }
+
+    async function loadAssignmentDetail(assignmentId) {
+      detailBody.innerHTML = '';
+      detailTitle.textContent = 'Loading assignment...';
+      detailSubtitle.textContent = '';
+      try {
+        const response = await fetch(`/api/assignments/${assignmentId}`);
+        if (!response.ok) throw new Error('Not found');
+        const assignment = await response.json();
+        detailTitle.textContent = assignment.assignmentTitle;
+        detailSubtitle.textContent = `${assignment.questionCount} question${assignment.questionCount === 1 ? '' : 's'} · ${assignment.submissionCount} submission${assignment.submissionCount === 1 ? '' : 's'}`;
+
+        const shareLink = buildShareLink(assignment.id);
+        const copyButton = document.createElement('button');
+        copyButton.textContent = 'Copy homework link';
+        copyButton.className = 'ghost';
+        copyButton.addEventListener('click', () => {
+          navigator.clipboard.writeText(shareLink);
+          copyButton.textContent = 'Copied!';
+          setTimeout(() => { copyButton.textContent = 'Copy homework link'; }, 1200);
+        });
+
+        const shareBlock = document.createElement('div');
+        shareBlock.className = 'stacked';
+        shareBlock.innerHTML = `
+          <p class="eyebrow">Share link</p>
+          <p class="qr-link">${shareLink}</p>
+        `;
+        shareBlock.appendChild(copyButton);
+
+        const submissions = document.createElement('div');
+        submissions.className = 'stacked';
+        submissions.innerHTML = '<p class="eyebrow">Submissions</p>';
+
+        if (!assignment.submissions.length) {
+          const empty = document.createElement('p');
+          empty.className = 'muted';
+          empty.textContent = 'No one has submitted this assignment yet.';
+          submissions.appendChild(empty);
+        } else {
+          const list = document.createElement('ul');
+          list.className = 'leaderboard';
+          assignment.submissions.forEach((submission) => {
+            const row = document.createElement('li');
+            row.className = 'leaderboard-row';
+            row.innerHTML = `
+              <div>
+                <strong>${submission.playerName}</strong>
+                <p class="muted">Submitted ${formatDate(submission.submittedAt)}</p>
+              </div>
+              <div class="quiz-actions">
+                <span class="badge">${submission.score} pts</span>
+                <span class="badge">${submission.percent}% correct</span>
+              </div>
+            `;
+            list.appendChild(row);
+          });
+          submissions.appendChild(list);
+        }
+
+        detailBody.appendChild(shareBlock);
+        detailBody.appendChild(submissions);
+      } catch (_error) {
+        detailTitle.textContent = 'Unable to load assignment';
+        detailSubtitle.textContent = 'Please try again later.';
+      }
+    }
+
+    async function createAssignment() {
+      if (!quizId) return;
+      const title = window.prompt('Assignment name (optional)', 'Homework assignment');
+      try {
+        const response = await fetch(`/api/quizzes/${quizId}/assignments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title }),
+        });
+        if (!response.ok) throw new Error('Failed to create assignment');
+        const created = await response.json();
+        await loadAssignments();
+        loadAssignmentDetail(created.id);
+      } catch (_error) {
+        alert('Unable to create assignment right now.');
+      }
+    }
+
+    createBtn.addEventListener('click', createAssignment);
+    loadQuiz();
+    loadAssignments();
+  </script>
+</body>
+</html>
