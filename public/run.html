@@ -68,9 +68,7 @@
   </div>
 
   <footer class="host-footer">
-    <div class="footer-actions">
-      <button type="button" id="footer-toggle" class="ghost">Minimize details</button>
-    </div>
+    <button type="button" id="footer-toggle" class="footer-toggle" aria-label="Minimize footer details"></button>
     <div id="qr-section" class="qr-section">
       <p class="eyebrow">QR code</p>
       <div class="footer-qr">
@@ -173,7 +171,9 @@
       if (!footer) return;
       footer.classList.toggle('footer-collapsed', collapsed);
       if (footerToggle) {
-        footerToggle.textContent = collapsed ? 'Show details' : 'Minimize details';
+        footerToggle.classList.toggle('is-collapsed', collapsed);
+        footerToggle.setAttribute('aria-pressed', collapsed ? 'true' : 'false');
+        footerToggle.setAttribute('aria-label', collapsed ? 'Expand footer details' : 'Minimize footer details');
       }
     }
 
@@ -213,6 +213,8 @@
       const nextCollapsed = !footer.classList.contains('footer-collapsed');
       setFooterCollapsed(nextCollapsed);
     });
+
+    setFooterCollapsed(false);
 
     function renderLeaderboard(players) {
       leaderboardList.innerHTML = '';
