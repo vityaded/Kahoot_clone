@@ -6,64 +6,156 @@
   <title>Homework quiz</title>
   <link rel="stylesheet" href="/styles.css" />
 </head>
-<body class="join">
+<body class="player-view">
   <div class="glow"></div>
-  <header>
-    <h1 id="assignment-title">Homework assignment</h1>
-    <p id="assignment-meta" class="muted">Loading assignment details...</p>
-  </header>
+  <main class="player-container">
+    <div class="player-status" id="lobby-status">Loading assignment...</div>
+    <p id="join-error" class="error"></p>
 
-  <main class="card">
-    <form id="homework-form" class="stacked">
-      <div class="inline-input stacked">
-        <label for="player-name">Your name</label>
-        <input id="player-name" type="text" placeholder="Enter your name" required />
+    <section class="question-board">
+      <div class="corner-badge" id="question-progress">Preparing question...</div>
+      <div class="corner-badge timer" id="timer">--</div>
+      <div class="question-content">
+        <p class="eyebrow">Homework</p>
+        <h1 id="question-text">Fetching assignment details...</h1>
+        <div id="correct-answer-display" class="correct-answer" aria-live="polite"></div>
+        <div id="player-answer-display" class="player-answer" aria-live="polite"></div>
+        <div class="media-preview" id="question-media"></div>
       </div>
-      <div id="question-container" class="stacked"></div>
-      <p id="form-error" class="error"></p>
-      <button type="submit">Submit answers</button>
-    </form>
+    </section>
 
-    <section id="result" class="stacked" style="display:none;">
-      <p class="eyebrow">Submission received</p>
-      <h2 id="result-score">Thanks for completing the homework!</h2>
-      <p id="result-detail" class="muted"></p>
-      <a class="button ghost" href="/join.html">Join a live quiz</a>
+    <section class="response-panel">
+      <form id="answer-form" class="answer-card hidden" autocomplete="off">
+        <label>
+          Your name
+          <input type="text" id="player-name" name="player-name" autocomplete="off" autocapitalize="words" />
+        </label>
+        <label>
+          Type your answer
+          <input
+            type="text"
+            id="answer-input"
+            name="response-field"
+            autocomplete="new-password"
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck="false"
+          />
+        </label>
+        <button type="submit">Submit answer</button>
+      </form>
+
+      <div class="card leaderboard-card" id="leaderboard-card">
+        <div class="leaderboard-header">
+          <h2 id="assignment-title">Homework assignment</h2>
+          <p id="assignment-meta" class="muted">Loading assignment details...</p>
+        </div>
+        <p id="answer-feedback"></p>
+        <ul id="leaderboard"></ul>
+        <div id="homework-result" class="stacked hidden">
+          <p class="eyebrow">Submission received</p>
+          <p id="result-score"></p>
+          <p id="result-detail" class="muted"></p>
+          <a class="button ghost" href="/join.html">Join a live quiz</a>
+        </div>
+      </div>
     </section>
   </main>
 
+  <div id="leaderboard-overlay" class="overlay hidden">
+    <div class="overlay-card">
+      <div class="leaderboard-header">
+        <h2>Leaderboard</h2>
+        <p id="overlay-hint" class="muted"></p>
+      </div>
+      <ul id="overlay-leaderboard"></ul>
+    </div>
+  </div>
+
+  <div id="answer-indicator" class="answer-indicator hidden" aria-live="assertive" aria-atomic="true"></div>
+
+  <script src="/js/player-shared.js"></script>
   <script>
     const params = new URLSearchParams(window.location.search);
     const assignmentId = params.get('assignmentId');
 
     const assignmentTitle = document.getElementById('assignment-title');
     const assignmentMeta = document.getElementById('assignment-meta');
-    const questionContainer = document.getElementById('question-container');
-    const formError = document.getElementById('form-error');
-    const form = document.getElementById('homework-form');
+    const formError = document.getElementById('join-error');
     const nameInput = document.getElementById('player-name');
-    const resultBlock = document.getElementById('result');
+    const resultBlock = document.getElementById('homework-result');
     const resultScore = document.getElementById('result-score');
     const resultDetail = document.getElementById('result-detail');
 
-    function renderMedia(media) {
-      if (!media || !media.src || !media.type) return '';
-      if (media.type === 'image') {
-        return `<img src="${media.src}" alt="${media.name || 'Question media'}" class="question-media" />`;
+    const playerView = new PlayerView({
+      onSubmit: handleAnswer,
+      onTimeExpired: handleTimeExpired,
+    });
+
+    const { answerForm } = playerView.el;
+
+    let assignmentQuestions = [];
+    let answers = [];
+    let currentIndex = 0;
+
+    function setError(text) {
+      formError.textContent = text;
+    }
+
+    function handleAnswer(trimmedAnswer) {
+      setError('');
+      const playerName = nameInput.value.trim();
+      if (!playerName) {
+        setError('Please enter your name to continue.');
+        playerView.setAnswerWaiting(false);
+        return;
       }
-      if (media.type === 'audio') {
-        return `<audio controls src="${media.src}"></audio>`;
+
+      answers[currentIndex] = trimmedAnswer;
+      proceedToNextQuestion();
+    }
+
+    function handleTimeExpired() {
+      if (answers[currentIndex]) return;
+      answers[currentIndex] = '';
+      proceedToNextQuestion();
+    }
+
+    function proceedToNextQuestion() {
+      playerView.stopTimer();
+      playerView.showPlayerAnswer('');
+      playerView.showCorrectAnswer('');
+      playerView.setAnswerWaiting(false);
+      answerForm.classList.add('hidden');
+      currentIndex += 1;
+      if (currentIndex >= assignmentQuestions.length) {
+        submitAnswers();
+      } else {
+        startQuestion(currentIndex);
       }
-      if (media.type === 'video') {
-        return `<video controls src="${media.src}" class="question-media"></video>`;
-      }
-      return '';
+    }
+
+    function startQuestion(index) {
+      const question = assignmentQuestions[index];
+      if (!question) return;
+      playerView.setStatus('');
+      playerView.hideOverlay();
+      const duration = calculateQuestionDuration(question.prompt);
+      playerView.startQuestion({
+        prompt: question.prompt,
+        index: index + 1,
+        total: assignmentQuestions.length,
+        duration,
+        media: question.media,
+      });
+      answerForm.classList.remove('hidden');
+      nameInput.disabled = false;
     }
 
     async function loadAssignment() {
       if (!assignmentId) {
         assignmentMeta.textContent = 'Missing assignment ID. Use the link provided by your teacher.';
-        form.style.display = 'none';
+        setError('Missing assignment ID.');
         return;
       }
 
@@ -74,53 +166,71 @@
         assignmentTitle.textContent = assignment.assignmentTitle;
         assignmentMeta.textContent = `${assignment.quizTitle} · ${assignment.questions.length} question${assignment.questions.length === 1 ? '' : 's'}`;
 
-        questionContainer.innerHTML = '';
-        assignment.questions.forEach((question, index) => {
-          const wrapper = document.createElement('div');
-          wrapper.className = 'stacked';
-          wrapper.innerHTML = `
-            <label for="question-${index}">${index + 1}. ${question.prompt}</label>
-            ${renderMedia(question.media)}
-            <input id="question-${index}" name="question-${index}" type="text" placeholder="Type your answer" required />
-          `;
-          questionContainer.appendChild(wrapper);
-        });
+        assignmentQuestions = assignment.questions || [];
+        answers = new Array(assignmentQuestions.length).fill('');
+        currentIndex = 0;
+
+        if (!assignmentQuestions.length) {
+          playerView.setQuestionText('This assignment has no questions.');
+          playerView.setQuestionProgress('No questions');
+          answerForm.classList.add('hidden');
+          return;
+        }
+
+        startQuestion(0);
       } catch (error) {
         assignmentMeta.textContent = 'This assignment could not be loaded.';
-        form.style.display = 'none';
+        playerView.setQuestionText('Assignment unavailable');
+        playerView.setStatus('');
+        setError('This assignment could not be loaded.');
       }
     }
 
-    async function submitAnswers(event) {
-      event.preventDefault();
-      formError.textContent = '';
-      const name = nameInput.value.trim();
-      if (!name) {
-        formError.textContent = 'Please enter your name.';
+    async function submitAnswers() {
+      const playerName = nameInput.value.trim();
+      if (!playerName) {
+        setError('Please enter your name to submit.');
+        currentIndex = Math.max(currentIndex - 1, 0);
+        startQuestion(currentIndex);
         return;
       }
 
-      const answers = Array.from(questionContainer.querySelectorAll('input'))
-        .map((input) => input.value);
+      playerView.setStatus('Submitting your responses...');
+      playerView.setAnswerWaiting(true);
+      answerForm.classList.add('hidden');
+
+      const payload = assignmentQuestions.map((_, idx) => answers[idx] || '');
 
       try {
         const response = await fetch(`/api/assignments/${assignmentId}/submit`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, answers }),
+          body: JSON.stringify({ name: playerName, answers: payload }),
         });
         if (!response.ok) throw new Error('Submit failed');
-        const payload = await response.json();
-        form.style.display = 'none';
-        resultBlock.style.display = 'block';
-        resultScore.textContent = `You scored ${payload.submission.score} points.`;
-        resultDetail.textContent = `You were ${payload.submission.percent}% correct across ${payload.submission.totalQuestions} question${payload.submission.totalQuestions === 1 ? '' : 's'}.`;
+        const result = await response.json();
+        playerView.stopTimer();
+        playerView.setQuestionProgress('Submission complete');
+        playerView.setQuestionText('Thanks for completing the homework!');
+        playerView.renderMedia(null);
+        if (playerView.el.timer) playerView.el.timer.textContent = '--';
+        playerView.setStatus('');
+        playerView.showCorrectAnswer('');
+        playerView.showPlayerAnswer('');
+        playerView.setAnswerFeedback('');
+        nameInput.disabled = true;
+        resultBlock.classList.remove('hidden');
+        resultScore.textContent = `You scored ${result.submission.score} points.`;
+        resultDetail.textContent = `You were ${result.submission.percent}% correct across ${result.submission.totalQuestions} question${result.submission.totalQuestions === 1 ? '' : 's'}.`;
       } catch (error) {
-        formError.textContent = 'Unable to submit right now. Please try again.';
+        setError('Unable to submit right now. Please try again.');
+        playerView.setAnswerWaiting(false);
+        answerForm.classList.remove('hidden');
+        currentIndex = Math.max(currentIndex - 1, 0);
+        startQuestion(currentIndex);
       }
     }
 
-    form.addEventListener('submit', submitAnswers);
     loadAssignment();
   </script>
 </body>
