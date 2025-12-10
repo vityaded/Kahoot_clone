@@ -38,7 +38,6 @@
         <input type="text" id="answer-input" autocomplete="off" autocapitalize="off" autocorrect="off" />
       </label>
       <div class="cta-row">
-        <button type="button" id="prev-question" class="ghost">Previous</button>
         <button type="button" id="next-question">Next</button>
       </div>
     </section>
@@ -77,7 +76,6 @@
     const questionMedia = document.getElementById('question-media');
     const answerInput = document.getElementById('answer-input');
     const nextQuestionButton = document.getElementById('next-question');
-    const prevQuestionButton = document.getElementById('prev-question');
     const reviewList = document.getElementById('review-list');
     const scoreDisplay = document.getElementById('score-display');
     const retakeButton = document.getElementById('retake-homework');
@@ -86,6 +84,38 @@
     let answers = [];
     let currentIndex = 0;
     let homeworkCode = '';
+    let timerId = null;
+    let timeRemaining = 0;
+
+    function stopTimer() {
+      if (timerId) {
+        clearInterval(timerId);
+        timerId = null;
+      }
+    }
+
+    function startTimer(durationSeconds) {
+      stopTimer();
+      const parsedDuration = Number(durationSeconds);
+      if (!Number.isFinite(parsedDuration) || parsedDuration <= 0) {
+        questionDuration.textContent = '';
+        return;
+      }
+
+      timeRemaining = Math.max(1, Math.round(parsedDuration));
+      questionDuration.textContent = `${timeRemaining}s left`;
+
+      timerId = setInterval(() => {
+        timeRemaining -= 1;
+        if (timeRemaining <= 0) {
+          questionDuration.textContent = 'Time is up';
+          stopTimer();
+          advanceQuestion();
+          return;
+        }
+        questionDuration.textContent = `${timeRemaining}s left`;
+      }, 1000);
+    }
 
     function renderMedia(media) {
       questionMedia.innerHTML = '';
@@ -123,12 +153,13 @@
       if (!question) return;
       questionText.textContent = question.prompt;
       questionProgress.textContent = `Question ${index + 1} of ${questions.length}`;
-      questionDuration.textContent = question.duration ? `${question.duration}s recommended` : '';
+      stopTimer();
+      questionDuration.textContent = '';
       renderMedia(question.media);
       answerInput.value = answers[index] || '';
       answerInput.focus();
-      prevQuestionButton.disabled = index === 0;
       nextQuestionButton.textContent = index === questions.length - 1 ? 'Submit homework' : 'Next';
+      startTimer(question.duration);
     }
 
     function formatDate(timestamp) {
@@ -179,6 +210,17 @@
       });
     }
 
+    function advanceQuestion() {
+      answers[currentIndex] = answerInput.value;
+      if (currentIndex === questions.length - 1) {
+        stopTimer();
+        submitHomework();
+        return;
+      }
+      currentIndex += 1;
+      renderQuestion(currentIndex);
+    }
+
     async function submitHomework() {
       const name = playerNameInput.value.trim();
       if (!name) {
@@ -186,6 +228,7 @@
         return;
       }
       homeworkError.textContent = '';
+      stopTimer();
       try {
         const response = await fetch(`/api/homework/${homeworkCode}/submit`, {
           method: 'POST',
@@ -203,21 +246,7 @@
       }
     }
 
-    nextQuestionButton.addEventListener('click', () => {
-      answers[currentIndex] = answerInput.value;
-      if (currentIndex === questions.length - 1) {
-        submitHomework();
-        return;
-      }
-      currentIndex += 1;
-      renderQuestion(currentIndex);
-    });
-
-    prevQuestionButton.addEventListener('click', () => {
-      answers[currentIndex] = answerInput.value;
-      currentIndex = Math.max(0, currentIndex - 1);
-      renderQuestion(currentIndex);
-    });
+    nextQuestionButton.addEventListener('click', advanceQuestion);
 
     startButton.addEventListener('click', () => {
       const name = playerNameInput.value.trim();
@@ -235,6 +264,7 @@
     });
 
     retakeButton.addEventListener('click', () => {
+      stopTimer();
       answers = new Array(questions.length).fill('');
       currentIndex = 0;
       answerInput.value = '';
