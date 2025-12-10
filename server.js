@@ -12,6 +12,7 @@ import {
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const DATA_FILE = path.join(DATA_DIR, 'quizzes.json');
+const HOMEWORK_FILE = path.join(DATA_DIR, 'homework.json');
 
 const app = express();
 const server = http.createServer(app);
@@ -61,6 +62,67 @@ async function loadPersistedQuizzes() {
   }
 }
 
+function serializeHomeworkForStorage() {
+  return Array.from(homeworkSessions.values()).map((session) => ({
+    id: session.id,
+    templateId: session.templateId,
+    title: session.title,
+    createdAt: session.createdAt,
+    dueAt: session.dueAt,
+    questionDuration: session.questionDuration,
+    submissions: Array.from(session.submissions.entries()).map(([key, payload]) => ({
+      key,
+      ...payload,
+    })),
+    questions: session.questions,
+  }));
+}
+
+async function persistHomeworkSessions() {
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  const payload = JSON.stringify(serializeHomeworkForStorage());
+  await fs.writeFile(HOMEWORK_FILE, payload, 'utf8');
+}
+
+async function loadPersistedHomeworkSessions() {
+  try {
+    const file = await fs.readFile(HOMEWORK_FILE, 'utf8');
+    const stored = JSON.parse(file);
+    stored.forEach((session) => {
+      const template = quizTemplates.get(session.templateId);
+      if (!template) return;
+
+      const submissions = new Map();
+      session.submissions?.forEach((entry) => {
+        if (!entry?.key) return;
+        submissions.set(entry.key, {
+          name: entry.name,
+          score: entry.score,
+          attempts: entry.attempts,
+          lastSubmitted: entry.lastSubmitted,
+          responses: entry.responses,
+        });
+      });
+
+      homeworkSessions.set(session.id, {
+        id: session.id,
+        templateId: session.templateId,
+        title: session.title,
+        createdAt: session.createdAt,
+        dueAt: session.dueAt,
+        submissions,
+        questions: session.questions,
+        questionDuration: session.questionDuration,
+      });
+    });
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      /* eslint-disable no-console */
+      console.error('Failed to load homework sessions from disk', error);
+    }
+  }
+}
+
 function buildMediaPayload(media) {
   if (!media || !media.src || !media.type) return null;
   return {
@@ -101,6 +163,10 @@ function createHomeworkSession(template, { dueAt = null } = {}) {
     questionDuration: template.questionDuration,
   };
   homeworkSessions.set(homeworkId, session);
+  persistHomeworkSessions().catch((error) => {
+    /* eslint-disable no-console */
+    console.error('Failed to save homework to disk', error);
+  });
   return session;
 }
 
@@ -138,6 +204,12 @@ async function recordHomeworkSubmission(session, name, answers = []) {
     responses: evaluation.responses,
   };
   session.submissions.set(key, payload);
+  try {
+    await persistHomeworkSessions();
+  } catch (error) {
+    /* eslint-disable no-console */
+    console.error('Failed to save homework submission', error);
+  }
   return payload;
 }
 
@@ -326,6 +398,7 @@ function endQuestion(sessionId, { fastForward = false } = {}) {
 }
 
 await loadPersistedQuizzes();
+await loadPersistedHomeworkSessions();
 
 io.on('connection', (socket) => {
   socket.on('host:createQuiz', ({ title, questions, questionDuration }) => {
