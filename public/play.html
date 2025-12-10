@@ -506,7 +506,8 @@
       if (!Array.isArray(players)) return;
       players.forEach((player, index) => {
         const li = document.createElement('li');
-        li.innerHTML = `<span>${index + 1}. ${player.name}</span><span>${player.score} pts</span>`;
+        const accuracy = Number.isFinite(player.accuracy) ? player.accuracy : 0;
+        li.innerHTML = `<span>${index + 1}. ${player.name}</span><span>${player.score} pts · ${accuracy}% correct</span>`;
         leaderboard.appendChild(li);
       });
     }

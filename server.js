@@ -103,6 +103,14 @@ function normalise(text = '') {
   return text.trim().toLowerCase();
 }
 
+function calculateQuestionDuration(prompt = '', baseSeconds = 20) {
+  const trimmed = prompt.trim();
+  if (!trimmed) return baseSeconds;
+  const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
+  const extraSeconds = Math.floor(wordCount / 2) * 10;
+  return baseSeconds + extraSeconds;
+}
+
 function levenshtein(a, b) {
   if (a === b) return 0;
   if (!a.length) return b.length;
@@ -240,10 +248,21 @@ async function scoreAssignmentSubmission(assignment, answers = []) {
   };
 }
 
+function calculateAccuracy(player) {
+  const answered = player.answeredQuestions || 0;
+  if (!answered) return 0;
+  const weightedCorrect = (player.correctAnswers || 0) + (player.partialAnswers || 0) * 0.5;
+  return Math.round((weightedCorrect / answered) * 100);
+}
+
 function formatLeaderboard(session) {
   return Array.from(session.players.values())
     .sort((a, b) => b.score - a.score)
-    .map(({ name, score }) => ({ name, score }));
+    .map((player) => ({
+      name: player.name,
+      score: player.score,
+      accuracy: calculateAccuracy(player),
+    }));
 }
 
 function createAssignmentFromQuiz(quizId, assignmentTitle = '') {
@@ -299,6 +318,7 @@ function clearQuestionState(session) {
 
 function createSessionFromTemplate(template, hostId = null) {
   const sessionId = generateQuizCode();
+  const baseQuestionDuration = Number(template.questionDuration) || 20;
   const session = {
     id: sessionId,
     templateId: template.id,
@@ -306,7 +326,8 @@ function createSessionFromTemplate(template, hostId = null) {
     title: template.title,
     players: new Map(),
     questions: template.questions,
-    questionDuration: template.questionDuration,
+    questionBaseDuration: baseQuestionDuration,
+    questionDuration: baseQuestionDuration,
     currentQuestionIndex: -1,
     questionStart: null,
     answers: new Set(),
@@ -427,15 +448,17 @@ function startQuestion(sessionId) {
   }
 
   const currentQuestion = session.questions[nextIndex];
+  const dynamicDuration = calculateQuestionDuration(currentQuestion.prompt, session.questionBaseDuration);
+  session.questionDuration = dynamicDuration;
   io.to(`${QUIZ_ROOM_PREFIX}${sessionId}`).emit('question:start', {
     prompt: currentQuestion.prompt,
     index: nextIndex + 1,
     total: session.questions.length,
-    duration: session.questionDuration,
+    duration: dynamicDuration,
     media: currentQuestion.media,
   });
 
-  session.questionTimer = setTimeout(() => endQuestion(sessionId), session.questionDuration * 1000);
+  session.questionTimer = setTimeout(() => endQuestion(sessionId), dynamicDuration * 1000);
 }
 
 function endQuestion(sessionId, { fastForward = false } = {}) {
@@ -573,6 +596,9 @@ io.on('connection', (socket) => {
         socketId: socket.id,
         name: displayName,
         score: 0,
+        correctAnswers: 0,
+        partialAnswers: 0,
+        answeredQuestions: 0,
         disconnectTimer: null,
       });
     }
@@ -682,11 +708,17 @@ io.on('connection', (socket) => {
         normalizedSynonyms.some((syn) => isCloseMatch(normalizedSubmitted, syn)) ||
         normalizedExpected.some((expected) => isCloseMatch(normalizedSubmitted, expected)));
     let earned = 0;
+    player.answeredQuestions = (player.answeredQuestions || 0) + 1;
     if (isCorrect || isPartial) {
       const speedBonus = Math.round((timeRemaining / durationMs) * 500);
       const baseScore = 1000 + speedBonus;
       earned = isCorrect ? baseScore : Math.round(baseScore / 2);
       player.score += earned;
+      if (isCorrect) {
+        player.correctAnswers = (player.correctAnswers || 0) + 1;
+      } else {
+        player.partialAnswers = (player.partialAnswers || 0) + 1;
+      }
     }
 
     session.answers.add(player.id);
@@ -727,9 +759,25 @@ io.on('connection', (socket) => {
       return;
     }
 
-    session.questionDuration = parsed;
-    socket.emit('host:durationUpdated', { duration: parsed });
-    io.to(`${QUIZ_ROOM_PREFIX}${quizId}`).emit('quiz:durationChanged', { duration: parsed });
+    session.questionBaseDuration = parsed;
+
+    let updatedDuration = parsed;
+    if (session.questionActive) {
+      const currentQuestion = session.questions[session.currentQuestionIndex];
+      updatedDuration = calculateQuestionDuration(currentQuestion?.prompt || '', session.questionBaseDuration);
+      const elapsedMs = Date.now() - session.questionStart;
+      const remainingMs = Math.max(updatedDuration * 1000 - elapsedMs, 0);
+      session.questionDuration = updatedDuration;
+      if (session.questionTimer) {
+        clearTimeout(session.questionTimer);
+      }
+      session.questionTimer = setTimeout(() => endQuestion(session.id), remainingMs);
+    } else {
+      session.questionDuration = parsed;
+    }
+
+    socket.emit('host:durationUpdated', { duration: updatedDuration });
+    io.to(`${QUIZ_ROOM_PREFIX}${quizId}`).emit('quiz:durationChanged', { duration: updatedDuration });
   });
 
   socket.on('disconnect', () => {
