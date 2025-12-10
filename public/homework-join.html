@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+  <title>Join Homework</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="glow"></div>
+  <header>
+    <h1>Join a homework assignment</h1>
+    <p>Enter the assignment code and your nickname to start the self-paced quiz.</p>
+    <div class="cta-row">
+      <a class="button ghost" href="/">Back to library</a>
+    </div>
+  </header>
+
+  <main class="grid single">
+    <section class="card">
+      <form id="join-form">
+        <label>
+          Assignment code
+          <input type="text" id="assignment-code" placeholder="123456" inputmode="numeric" pattern="\d{6}" maxlength="6" required />
+        </label>
+        <label>
+          Nickname
+          <input type="text" id="player-name" placeholder="Your name" required />
+        </label>
+        <button type="submit">Start homework</button>
+        <p id="join-error" class="error"></p>
+      </form>
+    </section>
+  </main>
+
+  <script>
+    const joinForm = document.getElementById('join-form');
+    const assignmentInput = document.getElementById('assignment-code');
+    const nameInput = document.getElementById('player-name');
+    const joinError = document.getElementById('join-error');
+
+    function sanitizeCode(raw) {
+      const digitsOnly = raw?.trim().replace(/\D/g, '');
+      return digitsOnly && digitsOnly.length === 6 ? digitsOnly : '';
+    }
+
+    joinForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const code = sanitizeCode(assignmentInput.value);
+      const name = nameInput.value?.trim();
+      if (!code) {
+        joinError.textContent = 'Enter the 6-digit assignment code you received.';
+        return;
+      }
+      if (!name) {
+        joinError.textContent = 'Please enter a nickname.';
+        return;
+      }
+
+      localStorage.setItem('homeworkCode', code);
+      localStorage.setItem('homeworkName', name);
+      window.location.href = '/homework-play.html';
+    });
+
+    const params = new URLSearchParams(window.location.search);
+    const paramCode = sanitizeCode(params.get('assignmentId'));
+    const autoJoin = params.get('autoJoin') === '1';
+
+    if (paramCode) {
+      assignmentInput.value = paramCode;
+      if (autoJoin) {
+        localStorage.setItem('homeworkCode', paramCode);
+        if (nameInput.value?.trim()) {
+          localStorage.setItem('homeworkName', nameInput.value.trim());
+        }
+        window.location.href = '/homework-play.html';
+      }
+    }
+  </script>
+</body>
+</html>

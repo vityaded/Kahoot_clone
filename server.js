@@ -15,11 +15,14 @@ const io = new Server(server);
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 const QUIZ_ROOM_PREFIX = 'quiz-';
+const HOMEWORK_ROOM_PREFIX = 'homework-';
 const DISCONNECT_GRACE_MS = 10000;
 
 const quizTemplates = new Map();
 const sessions = new Map();
 const playerSessions = new Map();
+const homeworkSessions = new Map();
+const homeworkPlayerSessions = new Map();
 const generateQuizCode = customAlphabet('0123456789', 6);
 const synonymCache = new Map();
 
@@ -52,6 +55,15 @@ async function loadPersistedQuizzes() {
       console.error('Failed to load quizzes from disk', error);
     }
   }
+}
+
+function calculateHomeworkDuration(prompt = '') {
+  const wordCount = prompt
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+
+  return 20 + Math.max(0, wordCount - 1) * 10;
 }
 
 function buildMediaPayload(media) {
@@ -197,6 +209,32 @@ function createSessionFromTemplate(template, hostId = null) {
   return session;
 }
 
+function createHomeworkSession(template) {
+  const sessionId = generateQuizCode();
+  const questionDurations = template.questions.map((question) =>
+    calculateHomeworkDuration(question?.prompt || ''),
+  );
+
+  const session = {
+    id: sessionId,
+    templateId: template.id,
+    title: `${template.title} (Homework)`,
+    players: new Map(),
+    questions: template.questions,
+    questionDurations,
+    currentQuestionIndex: -1,
+    questionStart: null,
+    answers: new Set(),
+    questionActive: false,
+    createdAt: Date.now(),
+    questionTimer: null,
+    leaderboardTimer: null,
+  };
+
+  homeworkSessions.set(sessionId, session);
+  return session;
+}
+
 function findPlayerBySocket(session, socketId) {
   for (const [playerId, player] of session.players) {
     if (player.socketId === socketId) {
@@ -206,9 +244,27 @@ function findPlayerBySocket(session, socketId) {
   return null;
 }
 
+function findHomeworkPlayerSession(playerId, assignmentId = null) {
+  const targetSessionId = assignmentId?.trim()?.toUpperCase() || homeworkPlayerSessions.get(playerId);
+  if (!targetSessionId) return null;
+  const session = homeworkSessions.get(targetSessionId);
+  if (!session) return null;
+  const player = session.players.get(playerId);
+  if (!player) return null;
+  return { sessionId: targetSessionId, session, player };
+}
+
 function calculateTimeRemaining(session) {
   if (!session.questionActive || !session.questionStart) return 0;
   const durationMs = session.questionDuration * 1000;
+  const elapsedMs = Date.now() - session.questionStart;
+  return Math.max(0, Math.ceil((durationMs - elapsedMs) / 1000));
+}
+
+function calculateHomeworkTimeRemaining(session) {
+  if (!session.questionActive || !session.questionStart) return 0;
+  const currentDuration = session.questionDurations[session.currentQuestionIndex] || 0;
+  const durationMs = currentDuration * 1000;
   const elapsedMs = Date.now() - session.questionStart;
   return Math.max(0, Math.ceil((durationMs - elapsedMs) / 1000));
 }
@@ -251,6 +307,30 @@ function emitPlayerState(socket, session, playerId = null) {
       socket.emit('quiz:countdown', { seconds: Math.ceil(remainingMs / 1000) });
     }
   }
+}
+
+function emitHomeworkState(socket, session, playerId = null) {
+  const currentQuestion = session.questions[session.currentQuestionIndex];
+  const duration = session.questionDurations[session.currentQuestionIndex];
+  socket.emit('homework:state', {
+    assignmentId: session.id,
+    title: session.title,
+    totalQuestions: session.questions.length,
+    questionDuration: duration,
+    leaderboard: formatLeaderboard(session),
+    questionActive: session.questionActive,
+    question: session.questionActive
+      ? {
+          prompt: currentQuestion.prompt,
+          index: session.currentQuestionIndex + 1,
+          total: session.questions.length,
+          duration,
+          media: currentQuestion.media,
+        }
+      : null,
+    timeRemaining: calculateHomeworkTimeRemaining(session),
+    hasAnswered: playerId ? session.answers.has(playerId) : false,
+  });
 }
 
 function scheduleLeaderboard(sessionId, { fastForward = false } = {}) {
@@ -323,6 +403,109 @@ function endQuestion(sessionId, { fastForward = false } = {}) {
     correctAnswer: currentQuestion?.answer,
   });
   scheduleLeaderboard(sessionId, { fastForward });
+}
+
+function formatHomeworkResults(session) {
+  return Array.from(session.players.values())
+    .sort((a, b) => b.score - a.score)
+    .map((player) => ({
+      name: player.name,
+      score: player.score,
+      correctPercentage: Math.round(
+        (player.correctAnswers / session.questions.length) * 100,
+      ),
+    }));
+}
+
+function emitHomeworkLeaderboard(sessionId) {
+  const session = homeworkSessions.get(sessionId);
+  if (!session) return;
+  const leaderboard = formatLeaderboard(session);
+  io.to(`${HOMEWORK_ROOM_PREFIX}${sessionId}`).emit('homework:leaderboard', leaderboard);
+}
+
+function concludeHomework(sessionId) {
+  const session = homeworkSessions.get(sessionId);
+  if (!session) return;
+  const results = formatHomeworkResults(session);
+  io.to(`${HOMEWORK_ROOM_PREFIX}${sessionId}`).emit('homework:finished', {
+    leaderboard: results,
+    totalQuestions: session.questions.length,
+  });
+}
+
+function scheduleHomeworkLeaderboard(sessionId) {
+  const session = homeworkSessions.get(sessionId);
+  if (!session) return;
+  const leaderboard = formatHomeworkResults(session);
+  const hasMoreQuestions = session.currentQuestionIndex + 1 < session.questions.length;
+  const pauseSeconds = 3;
+
+  io.to(`${HOMEWORK_ROOM_PREFIX}${sessionId}`).emit('homework:leaderboard', leaderboard);
+
+  const leaderboardDelay = pauseSeconds * 1000;
+
+  if (hasMoreQuestions) {
+    session.leaderboardTimer = setTimeout(
+      () => startHomeworkQuestion(sessionId),
+      leaderboardDelay,
+    );
+  } else {
+    session.leaderboardTimer = setTimeout(() => concludeHomework(sessionId), leaderboardDelay);
+  }
+}
+
+function startHomeworkQuestion(sessionId) {
+  const session = homeworkSessions.get(sessionId);
+  if (!session) return;
+
+  if (session.leaderboardTimer) {
+    clearTimeout(session.leaderboardTimer);
+    session.leaderboardTimer = null;
+  }
+
+  if (session.questionActive) return;
+
+  const nextIndex = session.currentQuestionIndex + 1;
+  if (nextIndex >= session.questions.length) {
+    concludeHomework(sessionId);
+    return;
+  }
+
+  session.currentQuestionIndex = nextIndex;
+  session.questionStart = Date.now();
+  session.questionActive = true;
+  session.answers = new Set();
+
+  const currentQuestion = session.questions[nextIndex];
+  const duration = session.questionDurations[nextIndex];
+
+  io.to(`${HOMEWORK_ROOM_PREFIX}${sessionId}`).emit('homework:questionStart', {
+    prompt: currentQuestion.prompt,
+    index: nextIndex + 1,
+    total: session.questions.length,
+    duration,
+    media: currentQuestion.media,
+  });
+
+  session.questionTimer = setTimeout(
+    () => endHomeworkQuestion(sessionId),
+    duration * 1000,
+  );
+}
+
+function endHomeworkQuestion(sessionId, { fastForward = false } = {}) {
+  const session = homeworkSessions.get(sessionId);
+  if (!session || !session.questionActive) return;
+
+  const currentQuestion = session.questions[session.currentQuestionIndex];
+  clearQuestionState(session);
+
+  io.to(`${HOMEWORK_ROOM_PREFIX}${sessionId}`).emit('homework:questionEnd', {
+    correctAnswer: currentQuestion?.answer,
+  });
+
+  scheduleHomeworkLeaderboard(sessionId, { fastForward });
 }
 
 await loadPersistedQuizzes();
@@ -413,6 +596,28 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('homework:createAssignment', ({ quizId }) => {
+    const lookupId = quizId?.trim()?.toUpperCase();
+    if (!lookupId) {
+      socket.emit('homework:error', 'Please enter a quiz code.');
+      return;
+    }
+
+    const template = quizTemplates.get(lookupId);
+    if (!template) {
+      socket.emit('homework:error', 'Unable to find quiz with that code.');
+      return;
+    }
+
+    const session = createHomeworkSession(template);
+    socket.emit('homework:assignmentCreated', {
+      assignmentId: session.id,
+      title: session.title,
+      questionCount: session.questions.length,
+      questionDurations: session.questionDurations,
+    });
+  });
+
   socket.on('player:join', ({ quizId, name, playerId }) => {
     const session = sessions.get(quizId?.trim()?.toUpperCase());
     if (!session) {
@@ -481,6 +686,65 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('homework:join', ({ assignmentId, name, playerId }) => {
+    const session = homeworkSessions.get(assignmentId?.trim()?.toUpperCase());
+    if (!session) {
+      socket.emit('homework:error', 'Homework assignment not found.');
+      return;
+    }
+
+    const displayName = name?.trim();
+    if (!displayName) {
+      socket.emit('homework:error', 'Please enter your name.');
+      return;
+    }
+
+    const resolvedPlayerId = playerId || nanoid(10);
+    const existingPlayer = session.players.get(resolvedPlayerId);
+
+    const previousSessionId = homeworkPlayerSessions.get(resolvedPlayerId);
+    if (previousSessionId && previousSessionId !== session.id) {
+      const previousSession = homeworkSessions.get(previousSessionId);
+      previousSession?.players.delete(resolvedPlayerId);
+    }
+
+    if (existingPlayer) {
+      if (existingPlayer.disconnectTimer) {
+        clearTimeout(existingPlayer.disconnectTimer);
+        existingPlayer.disconnectTimer = null;
+      }
+      existingPlayer.socketId = socket.id;
+      existingPlayer.name = displayName;
+    } else {
+      session.players.set(resolvedPlayerId, {
+        id: resolvedPlayerId,
+        socketId: socket.id,
+        name: displayName,
+        score: 0,
+        correctAnswers: 0,
+        disconnectTimer: null,
+      });
+    }
+
+    homeworkPlayerSessions.set(resolvedPlayerId, session.id);
+
+    socket.join(`${HOMEWORK_ROOM_PREFIX}${session.id}`);
+    socket.emit('homework:joined', {
+      assignmentId: session.id,
+      title: session.title,
+      totalQuestions: session.questions.length,
+      questionDurations: session.questionDurations,
+      playerId: resolvedPlayerId,
+    });
+
+    emitHomeworkState(socket, session, resolvedPlayerId);
+    emitHomeworkLeaderboard(session.id);
+
+    if (session.currentQuestionIndex === -1 && !session.questionActive) {
+      startHomeworkQuestion(session.id);
+    }
+  });
+
   socket.on('host:startQuestion', ({ quizId }) => {
     const session = sessions.get(quizId?.trim()?.toUpperCase());
     if (!session || session.hostId !== socket.id) return;
@@ -517,6 +781,34 @@ io.on('connection', (socket) => {
     if (session.hostId) {
       io.to(session.hostId).emit('host:playerJoined', formatLeaderboard(session));
     }
+  });
+
+  socket.on('homework:reconnect', ({ playerId, assignmentId }) => {
+    const found = findHomeworkPlayerSession(playerId, assignmentId);
+    if (!found) {
+      socket.emit('homework:reconnectFailed');
+      return;
+    }
+
+    const { session, sessionId, player } = found;
+    if (player.disconnectTimer) {
+      clearTimeout(player.disconnectTimer);
+      player.disconnectTimer = null;
+    }
+    player.socketId = socket.id;
+    homeworkPlayerSessions.set(playerId, sessionId);
+
+    socket.join(`${HOMEWORK_ROOM_PREFIX}${sessionId}`);
+    socket.emit('homework:reconnected', {
+      assignmentId: sessionId,
+      title: session.title,
+      playerId,
+      name: player.name,
+      totalQuestions: session.questions.length,
+      questionDurations: session.questionDurations,
+    });
+
+    emitHomeworkState(socket, session, playerId);
   });
 
   socket.on('player:answer', async ({ quizId, answer }) => {
@@ -585,6 +877,74 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('homework:answer', async ({ assignmentId, answer }) => {
+    const session = homeworkSessions.get(assignmentId?.trim()?.toUpperCase());
+    if (!session || !session.questionActive) return;
+    const found = findPlayerBySocket(session, socket.id);
+    const player = found?.player;
+    if (!player || session.answers.has(player.id)) return;
+
+    const submitted = answer ?? '';
+    const currentQuestion = session.questions[session.currentQuestionIndex];
+    const elapsedMs = Date.now() - session.questionStart;
+    const durationMs = (session.questionDurations[session.currentQuestionIndex] || 0) * 1000;
+    const timeRemaining = Math.max(0, durationMs - elapsedMs);
+
+    const expectedAnswers = [currentQuestion.answer, ...(currentQuestion.alternateAnswers || [])];
+    const normalizedSubmitted = normalise(submitted);
+    const normalizedExpected = expectedAnswers.map(normalise);
+    const normalizedPartial = (currentQuestion.partialAnswers || []).map(normalise);
+
+    const normalizedSynonyms = Array.from(
+      new Set(
+        (
+          await Promise.all(
+            expectedAnswers.map((expected) => fetchSynonyms(expected)),
+          )
+        )
+          .flat()
+          .filter(Boolean),
+      ),
+    );
+
+    const isCorrect = normalizedExpected.some((expected) => normalizedSubmitted === expected);
+    const isPartial =
+      !isCorrect &&
+      (normalizedPartial.includes(normalizedSubmitted) ||
+        normalizedSynonyms.includes(normalizedSubmitted) ||
+        normalizedSynonyms.some((syn) => isCloseMatch(normalizedSubmitted, syn)) ||
+        normalizedExpected.some((expected) => isCloseMatch(normalizedSubmitted, expected)));
+    let earned = 0;
+    if (isCorrect || isPartial) {
+      const speedBonus = durationMs ? Math.round((timeRemaining / durationMs) * 500) : 0;
+      const baseScore = 1000 + speedBonus;
+      earned = isCorrect ? baseScore : Math.round(baseScore / 2);
+      player.score += earned;
+    }
+
+    if (isCorrect) player.correctAnswers += 1;
+
+    session.answers.add(player.id);
+    socket.emit('homework:answerResult', {
+      correct: isCorrect,
+      partial: isPartial,
+      earned,
+      correctAnswer: currentQuestion.answer,
+      playerAnswer: submitted,
+    });
+
+    emitHomeworkLeaderboard(session.id);
+
+    const allPlayersAnswered = session.answers.size === session.players.size && session.players.size > 0;
+    if (allPlayersAnswered) {
+      if (session.questionTimer) {
+        clearTimeout(session.questionTimer);
+        session.questionTimer = null;
+      }
+      endHomeworkQuestion(session.id, { fastForward: true });
+    }
+  });
+
   socket.on('host:endQuestion', ({ quizId }) => {
     const session = sessions.get(quizId?.trim()?.toUpperCase());
     if (!session || session.hostId !== socket.id) return;
@@ -631,6 +991,22 @@ io.on('connection', (socket) => {
           session.players.delete(found.playerId);
           playerSessions.delete(found.playerId);
           emitLeaderboard(sessionId);
+          player.disconnectTimer = null;
+        }, DISCONNECT_GRACE_MS);
+      }
+    }
+
+    for (const [sessionId, session] of homeworkSessions) {
+      const found = findPlayerBySocket(session, socket.id);
+      if (found?.player) {
+        const player = found.player;
+        if (player.disconnectTimer) {
+          clearTimeout(player.disconnectTimer);
+        }
+        player.disconnectTimer = setTimeout(() => {
+          session.players.delete(found.playerId);
+          homeworkPlayerSessions.delete(found.playerId);
+          emitHomeworkLeaderboard(sessionId);
           player.disconnectTimer = null;
         }, DISCONNECT_GRACE_MS);
       }
