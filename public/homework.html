@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+  <title>Homework quiz</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="join">
+  <div class="glow"></div>
+  <header>
+    <h1 id="assignment-title">Homework assignment</h1>
+    <p id="assignment-meta" class="muted">Loading assignment details...</p>
+  </header>
+
+  <main class="card">
+    <form id="homework-form" class="stacked">
+      <div class="inline-input stacked">
+        <label for="player-name">Your name</label>
+        <input id="player-name" type="text" placeholder="Enter your name" required />
+      </div>
+      <div id="question-container" class="stacked"></div>
+      <p id="form-error" class="error"></p>
+      <button type="submit">Submit answers</button>
+    </form>
+
+    <section id="result" class="stacked" style="display:none;">
+      <p class="eyebrow">Submission received</p>
+      <h2 id="result-score">Thanks for completing the homework!</h2>
+      <p id="result-detail" class="muted"></p>
+      <a class="button ghost" href="/join.html">Join a live quiz</a>
+    </section>
+  </main>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const assignmentId = params.get('assignmentId');
+
+    const assignmentTitle = document.getElementById('assignment-title');
+    const assignmentMeta = document.getElementById('assignment-meta');
+    const questionContainer = document.getElementById('question-container');
+    const formError = document.getElementById('form-error');
+    const form = document.getElementById('homework-form');
+    const nameInput = document.getElementById('player-name');
+    const resultBlock = document.getElementById('result');
+    const resultScore = document.getElementById('result-score');
+    const resultDetail = document.getElementById('result-detail');
+
+    function renderMedia(media) {
+      if (!media || !media.src || !media.type) return '';
+      if (media.type === 'image') {
+        return `<img src="${media.src}" alt="${media.name || 'Question media'}" class="question-media" />`;
+      }
+      if (media.type === 'audio') {
+        return `<audio controls src="${media.src}"></audio>`;
+      }
+      if (media.type === 'video') {
+        return `<video controls src="${media.src}" class="question-media"></video>`;
+      }
+      return '';
+    }
+
+    async function loadAssignment() {
+      if (!assignmentId) {
+        assignmentMeta.textContent = 'Missing assignment ID. Use the link provided by your teacher.';
+        form.style.display = 'none';
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/assignments/${assignmentId}/take`);
+        if (!response.ok) throw new Error('Not found');
+        const assignment = await response.json();
+        assignmentTitle.textContent = assignment.assignmentTitle;
+        assignmentMeta.textContent = `${assignment.quizTitle} · ${assignment.questions.length} question${assignment.questions.length === 1 ? '' : 's'}`;
+
+        questionContainer.innerHTML = '';
+        assignment.questions.forEach((question, index) => {
+          const wrapper = document.createElement('div');
+          wrapper.className = 'stacked';
+          wrapper.innerHTML = `
+            <label for="question-${index}">${index + 1}. ${question.prompt}</label>
+            ${renderMedia(question.media)}
+            <input id="question-${index}" name="question-${index}" type="text" placeholder="Type your answer" required />
+          `;
+          questionContainer.appendChild(wrapper);
+        });
+      } catch (error) {
+        assignmentMeta.textContent = 'This assignment could not be loaded.';
+        form.style.display = 'none';
+      }
+    }
+
+    async function submitAnswers(event) {
+      event.preventDefault();
+      formError.textContent = '';
+      const name = nameInput.value.trim();
+      if (!name) {
+        formError.textContent = 'Please enter your name.';
+        return;
+      }
+
+      const answers = Array.from(questionContainer.querySelectorAll('input'))
+        .map((input) => input.value);
+
+      try {
+        const response = await fetch(`/api/assignments/${assignmentId}/submit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, answers }),
+        });
+        if (!response.ok) throw new Error('Submit failed');
+        const payload = await response.json();
+        form.style.display = 'none';
+        resultBlock.style.display = 'block';
+        resultScore.textContent = `You scored ${payload.submission.score} points.`;
+        resultDetail.textContent = `You were ${payload.submission.percent}% correct across ${payload.submission.totalQuestions} question${payload.submission.totalQuestions === 1 ? '' : 's'}.`;
+      } catch (error) {
+        formError.textContent = 'Unable to submit right now. Please try again.';
+      }
+    }
+
+    form.addEventListener('submit', submitAnswers);
+    loadAssignment();
+  </script>
+</body>
+</html>

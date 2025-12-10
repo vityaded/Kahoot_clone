@@ -1099,6 +1099,45 @@ body.player-view.input-engaged .question-board {
   margin: 12px 0;
 }
 
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+#assignment-detail .leaderboard {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+}
+
+#assignment-detail .leaderboard-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 10px;
+  gap: 12px;
+}
+
+.question-media {
+  width: 100%;
+  max-width: 520px;
+  border-radius: 12px;
+  margin-top: 6px;
+  box-shadow: 0 12px 26px var(--shadow);
+}
+
 .bulk-card textarea {
   width: 100%;
   margin: 8px 0;
