@@ -20,8 +20,11 @@ const DISCONNECT_GRACE_MS = 10000;
 const quizTemplates = new Map();
 const sessions = new Map();
 const playerSessions = new Map();
+const homeworkSessions = new Map();
 const generateQuizCode = customAlphabet('0123456789', 6);
 const synonymCache = new Map();
+
+app.use(express.json());
 
 function serializeForStorage() {
   return Array.from(quizTemplates.values()).map((quiz) => ({
@@ -150,6 +153,65 @@ function formatLeaderboard(session) {
   return Array.from(session.players.values())
     .sort((a, b) => b.score - a.score)
     .map(({ name, score }) => ({ name, score }));
+}
+
+function formatHomeworkLeaderboard(session) {
+  return Array.from(session.submissions.values()).sort((a, b) => b.score - a.score);
+}
+
+function createHomeworkSession(template, { dueAt = null } = {}) {
+  const homeworkId = generateQuizCode();
+  const session = {
+    id: homeworkId,
+    templateId: template.id,
+    title: template.title,
+    createdAt: Date.now(),
+    dueAt: dueAt && Number.isFinite(dueAt) ? dueAt : null,
+    submissions: new Map(),
+  };
+  homeworkSessions.set(homeworkId, session);
+  return session;
+}
+
+function findHomeworkSession(homeworkId) {
+  if (!homeworkId) return null;
+  return homeworkSessions.get(homeworkId.trim().toUpperCase()) || null;
+}
+
+function scoreHomeworkSubmission(session, answers = []) {
+  const template = quizTemplates.get(session.templateId);
+  if (!template) return 0;
+  const responses = Array.isArray(answers) ? answers : [];
+  let score = 0;
+
+  template.questions.forEach((question, index) => {
+    const submission = normalise(responses[index] ?? '');
+    const normalizedExpected = [question.answer, ...(question.alternateAnswers || [])].map(normalise);
+    const normalizedPartial = (question.partialAnswers || []).map(normalise);
+
+    const isCorrect = normalizedExpected.includes(submission);
+    const isPartial = !isCorrect && (normalizedPartial.includes(submission) || normalizedExpected.some((expected) => isCloseMatch(submission, expected)));
+
+    if (isCorrect) score += 1000;
+    else if (isPartial) score += 500;
+  });
+
+  return score;
+}
+
+function recordHomeworkSubmission(session, name, answers = []) {
+  if (!name?.trim()) return null;
+  const score = scoreHomeworkSubmission(session, answers);
+  const key = normalise(name) || name;
+  const existing = session.submissions.get(key);
+  const payload = {
+    name: name.trim(),
+    score: existing ? Math.max(existing.score, score) : score,
+    attempts: (existing?.attempts || 0) + 1,
+    lastSubmitted: Date.now(),
+  };
+  session.submissions.set(key, payload);
+  return payload;
 }
 
 function emitLeaderboard(sessionId) {
@@ -644,6 +706,23 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
 
+app.get('/api/quizzes/:quizId', (req, res) => {
+  const quizId = req.params.quizId?.trim()?.toUpperCase();
+  const quiz = quizTemplates.get(quizId);
+  if (!quiz) {
+    res.status(404).json({ error: 'Quiz not found' });
+    return;
+  }
+
+  res.json({
+    id: quiz.id,
+    title: quiz.title,
+    questionCount: quiz.questions.length,
+    questionDuration: quiz.questionDuration,
+    createdAt: quiz.createdAt,
+  });
+});
+
 app.get('/api/quizzes', (_req, res) => {
   const payload = Array.from(quizTemplates.values())
     .map((quiz) => ({
@@ -655,6 +734,75 @@ app.get('/api/quizzes', (_req, res) => {
     .sort((a, b) => b.createdAt - a.createdAt);
 
   res.json(payload);
+});
+
+app.post('/api/homework', (req, res) => {
+  const quizId = req.body?.quizId?.trim()?.toUpperCase();
+  const dueAtRaw = req.body?.dueAt;
+  const dueAt = dueAtRaw ? Date.parse(dueAtRaw) : null;
+  const template = quizTemplates.get(quizId);
+
+  if (!template) {
+    res.status(404).json({ error: 'Quiz not found' });
+    return;
+  }
+
+  const session = createHomeworkSession(template, { dueAt: Number.isFinite(dueAt) ? dueAt : null });
+  res.json({
+    id: session.id,
+    title: session.title,
+    quizId: session.templateId,
+    createdAt: session.createdAt,
+    dueAt: session.dueAt,
+    questionCount: template.questions.length,
+    leaderboard: formatHomeworkLeaderboard(session),
+  });
+});
+
+app.get('/api/homework/:homeworkId', (req, res) => {
+  const session = findHomeworkSession(req.params.homeworkId);
+  if (!session) {
+    res.status(404).json({ error: 'Homework not found' });
+    return;
+  }
+  const template = quizTemplates.get(session.templateId);
+
+  res.json({
+    id: session.id,
+    title: session.title,
+    quizId: session.templateId,
+    createdAt: session.createdAt,
+    dueAt: session.dueAt,
+    questionCount: template?.questions?.length || 0,
+    leaderboard: formatHomeworkLeaderboard(session),
+  });
+});
+
+app.get('/api/homework/:homeworkId/leaderboard', (req, res) => {
+  const session = findHomeworkSession(req.params.homeworkId);
+  if (!session) {
+    res.status(404).json({ error: 'Homework not found' });
+    return;
+  }
+  res.json(formatHomeworkLeaderboard(session));
+});
+
+app.post('/api/homework/:homeworkId/submit', (req, res) => {
+  const session = findHomeworkSession(req.params.homeworkId);
+  if (!session) {
+    res.status(404).json({ error: 'Homework not found' });
+    return;
+  }
+
+  const { playerName, answers } = req.body || {};
+  if (!playerName?.trim()) {
+    res.status(400).json({ error: 'Player name required' });
+    return;
+  }
+
+  const submission = recordHomeworkSubmission(session, playerName, answers);
+  const leaderboard = formatHomeworkLeaderboard(session);
+  res.json({ submission, leaderboard });
 });
 
 server.listen(PORT, HOST, () => {
