@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+  <title>Assign Homework</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="host">
+  <div class="glow"></div>
+  <header>
+    <p class="eyebrow">Homework mode</p>
+    <h1>Turn a quiz into a homework assignment</h1>
+    <p>Generate a dedicated homework link, set optional due dates, and keep tabs on who has completed the activity.</p>
+    <div class="cta-row">
+      <a class="button ghost" href="/">Back to library</a>
+      <a class="button ghost" href="/run.html">Live run</a>
+    </div>
+  </header>
+
+  <main class="grid">
+    <section class="card">
+      <div class="card-heading">
+        <div>
+          <p class="eyebrow">Selected quiz</p>
+          <h2 id="quiz-title">Loading quiz...</h2>
+          <p id="quiz-meta" class="muted"></p>
+        </div>
+        <div class="quiz-actions">
+          <button id="refresh-leaderboard" type="button" class="ghost" disabled>Refresh leaderboard</button>
+        </div>
+      </div>
+      <p id="quiz-error" class="error"></p>
+    </section>
+
+    <section class="card">
+      <div class="card-heading">
+        <div>
+          <p class="eyebrow">Assignment setup</p>
+          <h2>Create or revisit homework</h2>
+          <p class="muted">Start a fresh homework session for this quiz and send learners the generated link.</p>
+        </div>
+      </div>
+      <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px;">
+        <label>
+          Optional due date
+          <input type="datetime-local" id="due-date" />
+        </label>
+        <div>
+          <p class="muted">Each assignment is separate from live game sessions. You can create multiple homework codes for the same quiz to track different groups.</p>
+          <button id="create-homework" type="button">Create homework assignment</button>
+          <p id="create-error" class="error"></p>
+        </div>
+      </div>
+
+      <div id="assignment-panel" class="bulk-card hidden">
+        <h3>Homework details</h3>
+        <p class="muted">Share this link so learners can start the homework version of the quiz.</p>
+        <p><strong>Homework code:</strong> <span id="homework-code"></span></p>
+        <p><strong>Quiz template:</strong> <span id="homework-quiz"></span></p>
+        <p><strong>Created:</strong> <span id="homework-created"></span></p>
+        <p><strong>Due:</strong> <span id="homework-due">No due date</span></p>
+        <div class="cta-row">
+          <a id="homework-link" class="button" href="#" target="_blank">Open homework link</a>
+          <button id="copy-homework-link" type="button" class="ghost">Copy link</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-heading">
+        <div>
+          <p class="eyebrow">Homework leaderboard</p>
+          <h2>Top scores</h2>
+          <p class="muted">Scores are tracked separately from live game sessions.</p>
+        </div>
+      </div>
+      <ul id="leaderboard" class="quiz-list"></ul>
+      <p id="leaderboard-empty" class="muted">No submissions yet.</p>
+    </section>
+  </main>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    let quizId = params.get('quizId');
+    const homeworkId = params.get('homeworkId');
+
+    const quizTitleEl = document.getElementById('quiz-title');
+    const quizMetaEl = document.getElementById('quiz-meta');
+    const quizErrorEl = document.getElementById('quiz-error');
+    const createBtn = document.getElementById('create-homework');
+    const dueInput = document.getElementById('due-date');
+    const createErrorEl = document.getElementById('create-error');
+    const assignmentPanel = document.getElementById('assignment-panel');
+    const homeworkCodeEl = document.getElementById('homework-code');
+    const homeworkQuizEl = document.getElementById('homework-quiz');
+    const homeworkCreatedEl = document.getElementById('homework-created');
+    const homeworkDueEl = document.getElementById('homework-due');
+    const homeworkLinkEl = document.getElementById('homework-link');
+    const copyLinkBtn = document.getElementById('copy-homework-link');
+    const leaderboardList = document.getElementById('leaderboard');
+    const leaderboardEmpty = document.getElementById('leaderboard-empty');
+    const refreshLeaderboardBtn = document.getElementById('refresh-leaderboard');
+
+    function formatDate(timestamp) {
+      if (!timestamp) return 'No due date';
+      const date = new Date(timestamp);
+      return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    }
+
+    function renderQuizMeta(data) {
+      quizTitleEl.textContent = data?.title || 'Unknown quiz';
+      quizMetaEl.textContent = data
+        ? `${data.questionCount} question${data.questionCount === 1 ? '' : 's'} · Quiz code ${data.id}`
+        : '';
+    }
+
+    async function fetchQuizMeta(id) {
+      try {
+        const response = await fetch(`/api/quizzes/${id}`);
+        if (!response.ok) throw new Error('not-found');
+        const data = await response.json();
+        renderQuizMeta(data);
+        quizId = data.id;
+      } catch (error) {
+        quizErrorEl.textContent = 'Quiz not found. Return to the library to pick a different quiz.';
+        createBtn.disabled = true;
+      }
+    }
+
+    function renderLeaderboard(entries) {
+      leaderboardList.innerHTML = '';
+      if (!entries?.length) {
+        leaderboardEmpty.style.display = 'block';
+        return;
+      }
+      leaderboardEmpty.style.display = 'none';
+      entries.forEach((entry, index) => {
+        const item = document.createElement('li');
+        item.className = 'quiz-row';
+        item.innerHTML = `
+          <div>
+            <p class="eyebrow">#${index + 1}</p>
+            <h3>${entry.name}</h3>
+          </div>
+          <div class="quiz-actions">
+            <span class="muted">${entry.score} pts</span>
+          </div>
+        `;
+        leaderboardList.appendChild(item);
+      });
+    }
+
+    function buildShareUrl(id) {
+      return `${window.location.origin}/join.html?homeworkId=${id}`;
+    }
+
+    function showAssignmentDetails(session) {
+      assignmentPanel.classList.remove('hidden');
+      homeworkCodeEl.textContent = session.id;
+      homeworkQuizEl.textContent = session.quizId;
+      homeworkCreatedEl.textContent = formatDate(session.createdAt);
+      homeworkDueEl.textContent = formatDate(session.dueAt);
+      const link = buildShareUrl(session.id);
+      homeworkLinkEl.href = link;
+      homeworkLinkEl.textContent = 'Open homework link';
+      copyLinkBtn.onclick = () => {
+        navigator.clipboard.writeText(link);
+        copyLinkBtn.textContent = 'Copied!';
+        setTimeout(() => { copyLinkBtn.textContent = 'Copy link'; }, 1200);
+      };
+      refreshLeaderboardBtn.disabled = false;
+    }
+
+    async function loadHomeworkSession(id) {
+      try {
+        const response = await fetch(`/api/homework/${id}`);
+        if (!response.ok) throw new Error('not-found');
+        const data = await response.json();
+        renderQuizMeta({ id: data.quizId, title: data.title, questionCount: data.questionCount });
+        showAssignmentDetails(data);
+        renderLeaderboard(data.leaderboard);
+      } catch (error) {
+        quizErrorEl.textContent = 'Homework assignment not found.';
+      }
+    }
+
+    async function refreshLeaderboard() {
+      const code = homeworkCodeEl.textContent;
+      if (!code) return;
+      try {
+        const response = await fetch(`/api/homework/${code}/leaderboard`);
+        if (!response.ok) throw new Error('Failed to load leaderboard');
+        const data = await response.json();
+        renderLeaderboard(data);
+      } catch (_error) {
+        leaderboardEmpty.textContent = 'Unable to load leaderboard right now.';
+        leaderboardEmpty.style.display = 'block';
+      }
+    }
+
+    async function createHomework() {
+      createErrorEl.textContent = '';
+      if (!quizId) {
+        createErrorEl.textContent = 'Choose a quiz from the library first.';
+        return;
+      }
+      const dueAtValue = dueInput.value ? new Date(dueInput.value).toISOString() : null;
+      createBtn.disabled = true;
+      createBtn.textContent = 'Creating...';
+      try {
+        const response = await fetch('/api/homework', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ quizId, dueAt: dueAtValue }),
+        });
+        if (!response.ok) throw new Error('Unable to create homework');
+        const data = await response.json();
+        showAssignmentDetails(data);
+        renderLeaderboard([]);
+        window.history.replaceState({}, '', `/homework.html?quizId=${quizId}&homeworkId=${data.id}`);
+      } catch (error) {
+        createErrorEl.textContent = 'Unable to create homework right now. Please try again.';
+      } finally {
+        createBtn.disabled = false;
+        createBtn.textContent = 'Create homework assignment';
+      }
+    }
+
+    createBtn.addEventListener('click', createHomework);
+    refreshLeaderboardBtn.addEventListener('click', refreshLeaderboard);
+
+    if (homeworkId) {
+      loadHomeworkSession(homeworkId);
+    } else if (quizId) {
+      fetchQuizMeta(quizId);
+    } else {
+      quizErrorEl.textContent = 'No quiz selected. Return to the library to pick one.';
+      createBtn.disabled = true;
+    }
+  </script>
+</body>
+</html>
