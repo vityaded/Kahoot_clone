@@ -58,6 +58,17 @@
     </section>
   </main>
 
+  <div id="leaderboard-overlay" class="overlay hidden" role="dialog" aria-modal="true">
+    <div class="overlay-card">
+      <div class="leaderboard-header">
+        <h3 id="leaderboard-title">Homework leaderboard</h3>
+        <button type="button" id="leaderboard-continue">Continue</button>
+      </div>
+      <p class="muted" id="leaderboard-status">Here’s how everyone is doing so far.</p>
+      <ul id="leaderboard-list"></ul>
+    </div>
+  </div>
+
   <div id="answer-indicator" class="answer-indicator hidden" aria-live="polite">✓</div>
   <div id="feedback-toast" class="feedback-toast hidden" role="status" aria-live="polite">
     <div class="feedback-content">
@@ -101,6 +112,11 @@
     const feedbackPrompt = document.getElementById('feedback-prompt');
     const feedbackCorrect = document.getElementById('feedback-correct');
     const feedbackPlayer = document.getElementById('feedback-player');
+    const leaderboardOverlay = document.getElementById('leaderboard-overlay');
+    const leaderboardList = document.getElementById('leaderboard-list');
+    const leaderboardStatus = document.getElementById('leaderboard-status');
+    const leaderboardContinue = document.getElementById('leaderboard-continue');
+    const leaderboardTitle = document.getElementById('leaderboard-title');
 
     let questions = [];
     let answers = [];
@@ -110,6 +126,7 @@
     let timeRemaining = 0;
     let advancing = false;
     let feedbackTimer = null;
+    let leaderboardTimer = null;
 
     function stopTimer() {
       if (timerId) {
@@ -232,6 +249,77 @@
         `;
         reviewList.appendChild(block);
       });
+    }
+
+    function renderLeaderboard(entries) {
+      leaderboardList.innerHTML = '';
+
+      if (!entries?.length) {
+        const empty = document.createElement('li');
+        empty.className = 'muted';
+        empty.textContent = 'No submissions yet.';
+        leaderboardList.appendChild(empty);
+        return;
+      }
+
+      entries.forEach((entry, index) => {
+        const item = document.createElement('li');
+        const position = document.createElement('span');
+        position.textContent = `${index + 1}. ${entry.name || 'Player'}`;
+        const score = document.createElement('span');
+        score.textContent = `${entry.score ?? 0} pts`;
+        item.appendChild(position);
+        item.appendChild(score);
+        leaderboardList.appendChild(item);
+      });
+    }
+
+    function closeLeaderboardOverlay(resolve) {
+      leaderboardOverlay.classList.add('hidden');
+      leaderboardContinue.disabled = false;
+      if (leaderboardTimer) {
+        clearTimeout(leaderboardTimer);
+        leaderboardTimer = null;
+      }
+      resolve();
+    }
+
+    function showLeaderboardOverlay(entries, title) {
+      return new Promise((resolve) => {
+        leaderboardTitle.textContent = title || 'Homework leaderboard';
+        leaderboardStatus.textContent = 'Here’s how everyone is doing so far.';
+        renderLeaderboard(entries);
+        leaderboardOverlay.classList.remove('hidden');
+        leaderboardContinue.disabled = false;
+
+        const handleDismiss = () => {
+          leaderboardContinue.removeEventListener('click', handleDismiss);
+          closeLeaderboardOverlay(resolve);
+        };
+
+        leaderboardContinue.addEventListener('click', handleDismiss, { once: true });
+        leaderboardTimer = setTimeout(() => {
+          leaderboardContinue.removeEventListener('click', handleDismiss);
+          closeLeaderboardOverlay(resolve);
+        }, 3500);
+      });
+    }
+
+    async function fetchLeaderboard() {
+      if (!homeworkCode) return [];
+      try {
+        const response = await fetch(`/api/homework/${homeworkCode}/leaderboard`);
+        if (!response.ok) throw new Error('leaderboard-load-failed');
+        const data = await response.json();
+        return Array.isArray(data) ? data : [];
+      } catch (error) {
+        return [];
+      }
+    }
+
+    async function resolveLeaderboard(payload) {
+      if (Array.isArray(payload?.leaderboard)) return payload.leaderboard;
+      return fetchLeaderboard();
     }
 
     function hideFeedbackElements() {
@@ -366,6 +454,8 @@
         const data = await response.json();
         localStorage.setItem('playerName', name);
         scoreDisplay.textContent = `${data?.submission?.score ?? 0} pts`;
+        const leaderboard = await resolveLeaderboard(data);
+        await showLeaderboardOverlay(leaderboard, `${data?.title || homeworkTitle.textContent} leaderboard`);
         renderReview(data?.review || []);
         showCard(completionCard);
       } catch (error) {
