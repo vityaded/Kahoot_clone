@@ -231,6 +231,14 @@ h2 {
   color: rgba(255, 255, 255, 0.7);
 }
 
+.desktop-only {
+  display: initial;
+}
+
+.mobile-only {
+  display: none;
+}
+
 p {
   margin: 8px 0;
 }
@@ -1073,6 +1081,22 @@ body.player-view.input-engaged .question-board {
 
   .response-panel {
     grid-template-columns: 1fr;
+  }
+
+  .desktop-only {
+    display: none !important;
+  }
+
+  .mobile-only {
+    display: block;
+  }
+
+  .leaderboard-card .leaderboard-list {
+    display: none;
+  }
+
+  #leaderboard-overlay {
+    display: none !important;
   }
 
   .answer-card,

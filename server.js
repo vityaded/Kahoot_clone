@@ -26,6 +26,16 @@ const generateQuizCode = customAlphabet('0123456789', 6);
 const generateAssignmentCode = customAlphabet('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', 8);
 const synonymCache = new Map();
 
+function normalizeAssignmentId(id) {
+  return id?.trim()?.toUpperCase() || null;
+}
+
+function getAssignmentById(id) {
+  const normalized = normalizeAssignmentId(id);
+  if (!normalized) return null;
+  return assignments.get(normalized) || null;
+}
+
 app.use(express.json());
 
 function serializeForStorage() {
@@ -77,8 +87,11 @@ async function loadPersistedAssignments() {
     const file = await fs.readFile(ASSIGNMENTS_FILE, 'utf8');
     const stored = JSON.parse(file);
     stored.forEach((assignment) => {
-      assignments.set(assignment.id, {
+      const normalizedId = normalizeAssignmentId(assignment.id);
+      if (!normalizedId) return;
+      assignments.set(normalizedId, {
         ...assignment,
+        id: normalizedId,
         submissions: assignment.submissions || [],
       });
     });
@@ -269,8 +282,10 @@ function createAssignmentFromQuiz(quizId, assignmentTitle = '') {
   const template = quizTemplates.get(quizId);
   if (!template) return null;
 
+  const assignmentId = normalizeAssignmentId(generateAssignmentCode());
+  if (!assignmentId) return null;
   const assignment = {
-    id: generateAssignmentCode(),
+    id: assignmentId,
     quizId: template.id,
     quizTitle: template.title,
     assignmentTitle: assignmentTitle?.trim() || `${template.title} homework`,
@@ -841,6 +856,10 @@ app.post('/api/quizzes/:quizId/assignments', (req, res) => {
   }
 
   const assignment = createAssignmentFromQuiz(quizId, req.body?.title);
+  if (!assignment) {
+    res.status(500).json({ error: 'Unable to create assignment' });
+    return;
+  }
   persistAssignments().catch((error) => {
     /* eslint-disable no-console */
     console.error('Failed to persist assignments', error);
@@ -865,7 +884,7 @@ app.get('/api/quizzes/:quizId/assignments', (req, res) => {
 });
 
 app.get('/api/assignments/:assignmentId', (req, res) => {
-  const assignment = assignments.get(req.params.assignmentId);
+  const assignment = getAssignmentById(req.params.assignmentId);
   if (!assignment) {
     res.status(404).json({ error: 'Assignment not found' });
     return;
@@ -891,7 +910,7 @@ app.get('/api/assignments/:assignmentId', (req, res) => {
 });
 
 app.get('/api/assignments/:assignmentId/take', (req, res) => {
-  const assignment = assignments.get(req.params.assignmentId);
+  const assignment = getAssignmentById(req.params.assignmentId);
   if (!assignment) {
     res.status(404).json({ error: 'Assignment not found' });
     return;
@@ -911,7 +930,7 @@ app.get('/api/assignments/:assignmentId/take', (req, res) => {
 });
 
 app.post('/api/assignments/:assignmentId/submit', async (req, res) => {
-  const assignment = assignments.get(req.params.assignmentId);
+  const assignment = getAssignmentById(req.params.assignmentId);
   if (!assignment) {
     res.status(404).json({ error: 'Assignment not found' });
     return;
