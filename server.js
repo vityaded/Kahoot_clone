@@ -160,6 +160,14 @@ function formatHomeworkLeaderboard(session) {
 }
 
 function createHomeworkSession(template, { dueAt = null } = {}) {
+  const questions = template.questions.map((question) => {
+    const text = question.answer?.trim() || question.prompt?.trim() || '';
+    const wordCount = Math.max(text.split(/\s+/).filter(Boolean).length || 0, 1);
+    const duration = 20 + 10 * (wordCount - 1);
+
+    return { ...question, duration };
+  });
+
   const homeworkId = generateQuizCode();
   const session = {
     id: homeworkId,
@@ -168,6 +176,8 @@ function createHomeworkSession(template, { dueAt = null } = {}) {
     createdAt: Date.now(),
     dueAt: dueAt && Number.isFinite(dueAt) ? dueAt : null,
     submissions: new Map(),
+    questions,
+    questionDuration: template.questionDuration,
   };
   homeworkSessions.set(homeworkId, session);
   return session;
@@ -270,9 +280,18 @@ function findPlayerBySocket(session, socketId) {
 
 function calculateTimeRemaining(session) {
   if (!session.questionActive || !session.questionStart) return 0;
-  const durationMs = session.questionDuration * 1000;
+  const currentDuration = resolveQuestionDuration(session);
+  const durationMs = currentDuration * 1000;
   const elapsedMs = Date.now() - session.questionStart;
   return Math.max(0, Math.ceil((durationMs - elapsedMs) / 1000));
+}
+
+function resolveQuestionDuration(session, index = null) {
+  const questionIndex = Number.isInteger(index) ? index : session.currentQuestionIndex;
+  const questionDuration = session.questions?.[questionIndex]?.duration;
+  const parsedDuration = Number(questionDuration);
+  if (Number.isFinite(parsedDuration) && parsedDuration > 0) return parsedDuration;
+  return session.questionDuration;
 }
 
 function findPlayerSession(playerId, quizId = null) {
@@ -287,6 +306,7 @@ function findPlayerSession(playerId, quizId = null) {
 
 function emitPlayerState(socket, session, playerId = null) {
   const currentQuestion = session.questions[session.currentQuestionIndex];
+  const questionDuration = resolveQuestionDuration(session);
   socket.emit('player:state', {
     quizId: session.id,
     title: session.title,
@@ -299,7 +319,7 @@ function emitPlayerState(socket, session, playerId = null) {
           prompt: currentQuestion.prompt,
           index: session.currentQuestionIndex + 1,
           total: session.questions.length,
-          duration: session.questionDuration,
+          duration: questionDuration,
           media: currentQuestion.media,
         }
       : null,
@@ -365,15 +385,16 @@ function startQuestion(sessionId) {
   }
 
   const currentQuestion = session.questions[nextIndex];
+  const questionDuration = resolveQuestionDuration(session, nextIndex);
   io.to(`${QUIZ_ROOM_PREFIX}${sessionId}`).emit('question:start', {
     prompt: currentQuestion.prompt,
     index: nextIndex + 1,
     total: session.questions.length,
-    duration: session.questionDuration,
+    duration: questionDuration,
     media: currentQuestion.media,
   });
 
-  session.questionTimer = setTimeout(() => endQuestion(sessionId), session.questionDuration * 1000);
+  session.questionTimer = setTimeout(() => endQuestion(sessionId), questionDuration * 1000);
 }
 
 function endQuestion(sessionId, { fastForward = false } = {}) {
@@ -591,7 +612,8 @@ io.on('connection', (socket) => {
     const submitted = answer ?? '';
     const currentQuestion = session.questions[session.currentQuestionIndex];
     const elapsedMs = Date.now() - session.questionStart;
-    const durationMs = session.questionDuration * 1000;
+    const questionDuration = resolveQuestionDuration(session);
+    const durationMs = questionDuration * 1000;
     const timeRemaining = Math.max(0, durationMs - elapsedMs);
 
     const expectedAnswers = [currentQuestion.answer, ...(currentQuestion.alternateAnswers || [])];
