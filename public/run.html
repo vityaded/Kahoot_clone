@@ -68,6 +68,9 @@
   </div>
 
   <footer class="host-footer">
+    <div class="footer-actions">
+      <button type="button" id="footer-toggle" class="ghost">Minimize details</button>
+    </div>
     <div id="qr-section" class="qr-section">
       <p class="eyebrow">QR code</p>
       <div class="footer-qr">
@@ -152,6 +155,8 @@
     const qrLarge = document.getElementById('qr-large');
     const qrOverlayLink = document.getElementById('qr-overlay-link');
     const qrTrigger = document.getElementById('qr-trigger');
+    const footer = document.querySelector('.host-footer');
+    const footerToggle = document.getElementById('footer-toggle');
 
     let quizId = null;
     let timerId = null;
@@ -162,6 +167,14 @@
     function normalizeHostCode(raw) {
       const trimmed = raw?.trim();
       return trimmed ? trimmed.toUpperCase() : '';
+    }
+
+    function setFooterCollapsed(collapsed) {
+      if (!footer) return;
+      footer.classList.toggle('footer-collapsed', collapsed);
+      if (footerToggle) {
+        footerToggle.textContent = collapsed ? 'Show details' : 'Minimize details';
+      }
     }
 
     function buildJoinUrl(code) {
@@ -195,6 +208,11 @@
       const paramCode = normalizeHostCode(params.get('quizId'));
       quizCodeInput.value = paramCode || storedQuizId || '';
     }
+
+    footerToggle?.addEventListener('click', () => {
+      const nextCollapsed = !footer.classList.contains('footer-collapsed');
+      setFooterCollapsed(nextCollapsed);
+    });
 
     function renderLeaderboard(players) {
       leaderboardList.innerHTML = '';
