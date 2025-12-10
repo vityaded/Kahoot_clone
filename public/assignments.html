@@ -175,10 +175,17 @@
 
         const shareBlock = document.createElement('div');
         shareBlock.className = 'stacked';
+        const shareLinkAnchor = document.createElement('a');
+        shareLinkAnchor.href = shareLink;
+        shareLinkAnchor.textContent = shareLink;
+        shareLinkAnchor.className = 'qr-link';
+        shareLinkAnchor.target = '_blank';
+        shareLinkAnchor.rel = 'noopener noreferrer';
+
         shareBlock.innerHTML = `
           <p class="eyebrow">Share link</p>
-          <p class="qr-link">${shareLink}</p>
         `;
+        shareBlock.appendChild(shareLinkAnchor);
         shareBlock.appendChild(copyButton);
 
         const submissions = document.createElement('div');
