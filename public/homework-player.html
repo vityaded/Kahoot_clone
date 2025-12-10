@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+  <title>Homework Quiz</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="player-view">
+  <div class="glow"></div>
+  <main class="player-container">
+    <section class="card">
+      <p class="eyebrow">Homework code</p>
+      <h1 id="homework-title">Loading homework...</h1>
+      <p id="homework-meta" class="muted"></p>
+      <p id="homework-error" class="error"></p>
+    </section>
+
+    <section class="card" id="intro-card">
+      <h2>Ready to begin?</h2>
+      <p class="muted">Enter your name to start answering questions at your own pace.</p>
+      <label>
+        Your name
+        <input type="text" id="player-name" placeholder="Alex" />
+      </label>
+      <button type="button" id="start-homework">Start homework</button>
+    </section>
+
+    <section class="card hidden" id="question-card">
+      <div class="card-heading">
+        <p class="eyebrow" id="question-progress"></p>
+        <p class="muted" id="question-duration"></p>
+      </div>
+      <h2 id="question-text">Loading question...</h2>
+      <div class="media-preview" id="question-media"></div>
+      <label>
+        Your answer
+        <input type="text" id="answer-input" autocomplete="off" autocapitalize="off" autocorrect="off" />
+      </label>
+      <div class="cta-row">
+        <button type="button" id="prev-question" class="ghost">Previous</button>
+        <button type="button" id="next-question">Next</button>
+      </div>
+    </section>
+
+    <section class="card hidden" id="completion-card">
+      <div class="card-heading">
+        <div>
+          <p class="eyebrow">Homework complete</p>
+          <h2>Thanks for submitting!</h2>
+        </div>
+        <div class="quiz-actions">
+          <span id="score-display" class="muted"></span>
+        </div>
+      </div>
+      <p class="muted">Review the questions you missed below. Correct answers are shown for anything marked incorrect.</p>
+      <div id="review-list" class="review-list"></div>
+      <button type="button" id="retake-homework" class="ghost">Try again</button>
+    </section>
+  </main>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const homeworkId = params.get('homeworkId');
+
+    const homeworkTitle = document.getElementById('homework-title');
+    const homeworkMeta = document.getElementById('homework-meta');
+    const homeworkError = document.getElementById('homework-error');
+    const introCard = document.getElementById('intro-card');
+    const questionCard = document.getElementById('question-card');
+    const completionCard = document.getElementById('completion-card');
+    const playerNameInput = document.getElementById('player-name');
+    const startButton = document.getElementById('start-homework');
+    const questionText = document.getElementById('question-text');
+    const questionProgress = document.getElementById('question-progress');
+    const questionDuration = document.getElementById('question-duration');
+    const questionMedia = document.getElementById('question-media');
+    const answerInput = document.getElementById('answer-input');
+    const nextQuestionButton = document.getElementById('next-question');
+    const prevQuestionButton = document.getElementById('prev-question');
+    const reviewList = document.getElementById('review-list');
+    const scoreDisplay = document.getElementById('score-display');
+    const retakeButton = document.getElementById('retake-homework');
+
+    let questions = [];
+    let answers = [];
+    let currentIndex = 0;
+    let homeworkCode = '';
+
+    function renderMedia(media) {
+      questionMedia.innerHTML = '';
+      if (!media?.src || !media?.type) return;
+      if (media.type === 'image') {
+        const img = document.createElement('img');
+        img.src = media.src;
+        img.alt = media.name || 'Question image';
+        questionMedia.appendChild(img);
+        return;
+      }
+      if (media.type === 'audio') {
+        const audio = document.createElement('audio');
+        audio.src = media.src;
+        audio.controls = true;
+        questionMedia.appendChild(audio);
+        return;
+      }
+      if (media.type === 'video') {
+        const video = document.createElement('video');
+        video.src = media.src;
+        video.controls = true;
+        questionMedia.appendChild(video);
+      }
+    }
+
+    function showCard(card) {
+      [introCard, questionCard, completionCard].forEach((panel) => {
+        panel.classList.toggle('hidden', panel !== card);
+      });
+    }
+
+    function renderQuestion(index) {
+      const question = questions[index];
+      if (!question) return;
+      questionText.textContent = question.prompt;
+      questionProgress.textContent = `Question ${index + 1} of ${questions.length}`;
+      questionDuration.textContent = question.duration ? `${question.duration}s recommended` : '';
+      renderMedia(question.media);
+      answerInput.value = answers[index] || '';
+      answerInput.focus();
+      prevQuestionButton.disabled = index === 0;
+      nextQuestionButton.textContent = index === questions.length - 1 ? 'Submit homework' : 'Next';
+    }
+
+    function formatDate(timestamp) {
+      if (!timestamp) return 'No due date';
+      const date = new Date(timestamp);
+      return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    }
+
+    async function loadHomework() {
+      if (!homeworkId) {
+        homeworkError.textContent = 'Homework code missing.';
+        return;
+      }
+      try {
+        const response = await fetch(`/api/homework/${homeworkId}`);
+        if (!response.ok) throw new Error('not-found');
+        const data = await response.json();
+        homeworkCode = data.id;
+        homeworkTitle.textContent = data.title;
+        homeworkMeta.textContent = `${data.questionCount} question${data.questionCount === 1 ? '' : 's'} · Code ${data.id} · Due ${formatDate(data.dueAt)}`;
+        questions = data.questions || [];
+        answers = new Array(questions.length).fill('');
+      } catch (error) {
+        homeworkError.textContent = 'Unable to load this homework assignment. Check the code and try again.';
+        introCard.classList.add('hidden');
+      }
+    }
+
+    function renderReview(items) {
+      reviewList.innerHTML = '';
+      if (!items.length) {
+        const success = document.createElement('p');
+        success.className = 'muted';
+        success.textContent = 'Nice work! You answered every question correctly.';
+        reviewList.appendChild(success);
+        return;
+      }
+
+      items.forEach((item) => {
+        const block = document.createElement('div');
+        block.className = 'review-item';
+        block.innerHTML = `
+          <p class="eyebrow">${item.prompt}</p>
+          <p><strong>Your answer:</strong> ${item.submitted || '<em>No answer</em>'}</p>
+          <p><strong>Correct answer:</strong> ${item.correctAnswer || '<em>Not provided</em>'}</p>
+        `;
+        reviewList.appendChild(block);
+      });
+    }
+
+    async function submitHomework() {
+      const name = playerNameInput.value.trim();
+      if (!name) {
+        homeworkError.textContent = 'Please enter your name before submitting.';
+        return;
+      }
+      homeworkError.textContent = '';
+      try {
+        const response = await fetch(`/api/homework/${homeworkCode}/submit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ playerName: name, answers }),
+        });
+        if (!response.ok) throw new Error('submit-failed');
+        const data = await response.json();
+        localStorage.setItem('playerName', name);
+        scoreDisplay.textContent = `${data?.submission?.score ?? 0} pts`;
+        renderReview(data?.review || []);
+        showCard(completionCard);
+      } catch (error) {
+        homeworkError.textContent = 'Unable to submit your homework right now. Please try again.';
+      }
+    }
+
+    nextQuestionButton.addEventListener('click', () => {
+      answers[currentIndex] = answerInput.value;
+      if (currentIndex === questions.length - 1) {
+        submitHomework();
+        return;
+      }
+      currentIndex += 1;
+      renderQuestion(currentIndex);
+    });
+
+    prevQuestionButton.addEventListener('click', () => {
+      answers[currentIndex] = answerInput.value;
+      currentIndex = Math.max(0, currentIndex - 1);
+      renderQuestion(currentIndex);
+    });
+
+    startButton.addEventListener('click', () => {
+      const name = playerNameInput.value.trim();
+      if (!name) {
+        homeworkError.textContent = 'Please enter your name to begin.';
+        return;
+      }
+      if (!questions.length) {
+        homeworkError.textContent = 'This homework does not have any questions yet.';
+        return;
+      }
+      homeworkError.textContent = '';
+      showCard(questionCard);
+      renderQuestion(currentIndex);
+    });
+
+    retakeButton.addEventListener('click', () => {
+      answers = new Array(questions.length).fill('');
+      currentIndex = 0;
+      answerInput.value = '';
+      showCard(questionCard);
+      renderQuestion(currentIndex);
+    });
+
+    window.addEventListener('load', () => {
+      const storedName = localStorage.getItem('playerName');
+      if (storedName) {
+        playerNameInput.value = storedName;
+      }
+      loadHomework();
+    });
+  </script>
+</body>
+</html>

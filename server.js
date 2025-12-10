@@ -188,14 +188,15 @@ function findHomeworkSession(homeworkId) {
   return homeworkSessions.get(homeworkId.trim().toUpperCase()) || null;
 }
 
-function scoreHomeworkSubmission(session, answers = []) {
+function evaluateHomeworkSubmission(session, answers = []) {
   const template = quizTemplates.get(session.templateId);
-  if (!template) return 0;
+  if (!template) return { score: 0, responses: [] };
   const responses = Array.isArray(answers) ? answers : [];
-  let score = 0;
 
-  template.questions.forEach((question, index) => {
-    const submission = normalise(responses[index] ?? '');
+  let score = 0;
+  const detailedResponses = template.questions.map((question, index) => {
+    const rawSubmission = responses[index] ?? '';
+    const submission = normalise(rawSubmission);
     const normalizedExpected = [question.answer, ...(question.alternateAnswers || [])].map(normalise);
     const normalizedPartial = (question.partialAnswers || []).map(normalise);
 
@@ -204,14 +205,27 @@ function scoreHomeworkSubmission(session, answers = []) {
 
     if (isCorrect) score += 1000;
     else if (isPartial) score += 500;
+
+    return {
+      prompt: question.prompt,
+      submitted: typeof rawSubmission === 'string' ? rawSubmission : String(rawSubmission ?? ''),
+      correctAnswer: question.answer,
+      isCorrect,
+    };
   });
 
-  return score;
+  return { score, responses: detailedResponses };
+}
+
+function scoreHomeworkSubmission(session, answers = []) {
+  const evaluation = evaluateHomeworkSubmission(session, answers);
+  return evaluation.score;
 }
 
 function recordHomeworkSubmission(session, name, answers = []) {
   if (!name?.trim()) return null;
-  const score = scoreHomeworkSubmission(session, answers);
+  const evaluation = evaluateHomeworkSubmission(session, answers);
+  const score = evaluation.score;
   const key = normalise(name) || name;
   const existing = session.submissions.get(key);
   const payload = {
@@ -219,6 +233,7 @@ function recordHomeworkSubmission(session, name, answers = []) {
     score: existing ? Math.max(existing.score, score) : score,
     attempts: (existing?.attempts || 0) + 1,
     lastSubmitted: Date.now(),
+    responses: evaluation.responses,
   };
   session.submissions.set(key, payload);
   return payload;
@@ -796,6 +811,11 @@ app.get('/api/homework/:homeworkId', (req, res) => {
     createdAt: session.createdAt,
     dueAt: session.dueAt,
     questionCount: template?.questions?.length || 0,
+    questions: session.questions.map((question) => ({
+      prompt: question.prompt,
+      media: question.media,
+      duration: question.duration,
+    })),
     leaderboard: formatHomeworkLeaderboard(session),
   });
 });
@@ -824,7 +844,14 @@ app.post('/api/homework/:homeworkId/submit', (req, res) => {
 
   const submission = recordHomeworkSubmission(session, playerName, answers);
   const leaderboard = formatHomeworkLeaderboard(session);
-  res.json({ submission, leaderboard });
+  const review = (submission?.responses || [])
+    .filter((entry) => !entry.isCorrect)
+    .map((entry) => ({
+      prompt: entry.prompt,
+      submitted: entry.submitted,
+      correctAnswer: entry.correctAnswer,
+    }));
+  res.json({ submission, leaderboard, review });
 });
 
 server.listen(PORT, HOST, () => {
