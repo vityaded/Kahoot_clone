@@ -58,6 +58,22 @@
     </section>
   </main>
 
+  <div id="answer-indicator" class="answer-indicator hidden" aria-live="polite">✓</div>
+  <div id="feedback-toast" class="feedback-toast hidden" role="status" aria-live="polite">
+    <div class="feedback-content">
+      <p class="feedback-status" id="feedback-status"></p>
+      <p class="feedback-prompt" id="feedback-prompt"></p>
+      <p class="feedback-line">
+        <span>Correct answer:</span>
+        <span id="feedback-correct"></span>
+      </p>
+      <p class="feedback-line">
+        <span>Your answer:</span>
+        <span id="feedback-player"></span>
+      </p>
+    </div>
+  </div>
+
   <script>
     const params = new URLSearchParams(window.location.search);
     const homeworkId = params.get('homeworkId');
@@ -79,6 +95,12 @@
     const reviewList = document.getElementById('review-list');
     const scoreDisplay = document.getElementById('score-display');
     const retakeButton = document.getElementById('retake-homework');
+    const answerIndicator = document.getElementById('answer-indicator');
+    const feedbackToast = document.getElementById('feedback-toast');
+    const feedbackStatus = document.getElementById('feedback-status');
+    const feedbackPrompt = document.getElementById('feedback-prompt');
+    const feedbackCorrect = document.getElementById('feedback-correct');
+    const feedbackPlayer = document.getElementById('feedback-player');
 
     let questions = [];
     let answers = [];
@@ -86,6 +108,8 @@
     let homeworkCode = '';
     let timerId = null;
     let timeRemaining = 0;
+    let advancing = false;
+    let feedbackTimer = null;
 
     function stopTimer() {
       if (timerId) {
@@ -110,7 +134,7 @@
         if (timeRemaining <= 0) {
           questionDuration.textContent = 'Time is up';
           stopTimer();
-          advanceQuestion();
+          handleAnswerAdvance();
           return;
         }
         questionDuration.textContent = `${timeRemaining}s left`;
@@ -210,8 +234,111 @@
       });
     }
 
-    function advanceQuestion() {
+    function hideFeedbackElements() {
+      answerIndicator.classList.add('hidden');
+      answerIndicator.classList.remove('visible');
+      feedbackToast.classList.add('hidden');
+      feedbackToast.classList.remove('visible');
+    }
+
+    function restoreFocus() {
+      if (!questionCard.classList.contains('hidden')) {
+        answerInput.focus();
+      }
+    }
+
+    function populateFeedback(evaluation, question) {
+      const isPartial = evaluation?.isPartial;
+      feedbackStatus.textContent = isPartial ? 'Almost there' : 'Not quite right';
+      feedbackPrompt.textContent = question?.prompt || 'Question';
+      feedbackCorrect.textContent = evaluation?.correctAnswer || 'No correct answer provided';
+      feedbackPlayer.textContent = evaluation?.playerAnswer || 'No answer provided';
+    }
+
+    function showCheckmark() {
+      return new Promise((resolve) => {
+        answerIndicator.textContent = '✓';
+        answerIndicator.classList.remove('hidden', 'partial', 'incorrect');
+        answerIndicator.classList.add('visible', 'correct');
+
+        feedbackTimer = setTimeout(() => {
+          answerIndicator.classList.remove('visible');
+          feedbackTimer = setTimeout(() => {
+            answerIndicator.classList.add('hidden');
+            restoreFocus();
+            resolve();
+          }, 180);
+        }, 2000);
+      });
+    }
+
+    function showFeedbackToast(evaluation, question) {
+      return new Promise((resolve) => {
+        populateFeedback(evaluation, question);
+        feedbackToast.classList.remove('hidden');
+        feedbackToast.classList.add('visible');
+
+        feedbackTimer = setTimeout(() => {
+          feedbackToast.classList.remove('visible');
+          feedbackTimer = setTimeout(() => {
+            feedbackToast.classList.add('hidden');
+            restoreFocus();
+            resolve();
+          }, 180);
+        }, 2000);
+      });
+    }
+
+    async function showEvaluationFeedback(evaluation, question) {
+      if (!evaluation) return;
+      stopTimer();
+      clearTimeout(feedbackTimer);
+      hideFeedbackElements();
+      if (evaluation.isCorrect) {
+        await showCheckmark();
+        return;
+      }
+      await showFeedbackToast(evaluation, question);
+    }
+
+    async function evaluateCurrentAnswer() {
+      if (!homeworkCode) return null;
+      try {
+        const response = await fetch(`/api/homework/${homeworkCode}/evaluate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            answer: answerInput.value,
+            questionIndex: currentIndex,
+          }),
+        });
+        if (!response.ok) throw new Error('evaluation-failed');
+        return await response.json();
+      } catch (error) {
+        return null;
+      }
+    }
+
+    async function handleAnswerAdvance() {
+      if (advancing) return;
+      advancing = true;
+      stopTimer();
+
+      const question = questions[currentIndex];
+      if (!question) {
+        advancing = false;
+        return;
+      }
+
       answers[currentIndex] = answerInput.value;
+      const evaluation = await evaluateCurrentAnswer();
+      await showEvaluationFeedback(evaluation, question);
+
+      advanceQuestion();
+      advancing = false;
+    }
+
+    function advanceQuestion() {
       if (currentIndex === questions.length - 1) {
         stopTimer();
         submitHomework();
@@ -246,7 +373,7 @@
       }
     }
 
-    nextQuestionButton.addEventListener('click', advanceQuestion);
+    nextQuestionButton.addEventListener('click', handleAnswerAdvance);
 
     startButton.addEventListener('click', () => {
       const name = playerNameInput.value.trim();
@@ -265,6 +392,8 @@
 
     retakeButton.addEventListener('click', () => {
       stopTimer();
+      clearTimeout(feedbackTimer);
+      hideFeedbackElements();
       answers = new Array(questions.length).fill('');
       currentIndex = 0;
       answerInput.value = '';
