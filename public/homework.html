@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+  <title>Homework assignments</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="glow"></div>
+  <header>
+    <h1>Launch a homework assignment</h1>
+    <p>Generate a stand-alone assignment code that mirrors the player experience without affecting live games.</p>
+    <div class="cta-row">
+      <a class="button ghost" href="/">Back to library</a>
+      <a class="button ghost" href="/homework-join.html">Learner join page</a>
+    </div>
+  </header>
+
+  <main class="grid single">
+    <section class="card">
+      <form id="assignment-form">
+        <label>
+          Quiz code
+          <input type="text" id="quiz-code" placeholder="123456" inputmode="numeric" pattern="\d{6}" maxlength="6" required />
+        </label>
+        <button type="submit">Create homework assignment</button>
+        <p id="assignment-error" class="error"></p>
+      </form>
+
+      <div id="assignment-result" class="success" style="display: none;">
+        <p class="eyebrow">Assignment ready</p>
+        <h2 id="assignment-title"></h2>
+        <p class="muted" id="assignment-meta"></p>
+        <div class="quiz-actions">
+          <div>
+            <p class="eyebrow">Assignment code</p>
+            <p id="assignment-code" class="code"></p>
+          </div>
+          <div class="cta-row">
+            <button type="button" id="copy-code" class="copy">Copy code</button>
+            <button type="button" id="copy-link" class="ghost">Copy join link</button>
+          </div>
+        </div>
+        <p class="muted" id="duration-hint"></p>
+      </div>
+    </section>
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const assignmentForm = document.getElementById('assignment-form');
+    const quizCode = document.getElementById('quiz-code');
+    const assignmentError = document.getElementById('assignment-error');
+    const assignmentResult = document.getElementById('assignment-result');
+    const assignmentCode = document.getElementById('assignment-code');
+    const assignmentTitle = document.getElementById('assignment-title');
+    const assignmentMeta = document.getElementById('assignment-meta');
+    const copyCodeBtn = document.getElementById('copy-code');
+    const copyLinkBtn = document.getElementById('copy-link');
+    const durationHint = document.getElementById('duration-hint');
+
+    let latestAssignmentId = '';
+
+    function sanitizeCode(raw) {
+      const digitsOnly = raw?.trim().replace(/\D/g, '');
+      return digitsOnly && digitsOnly.length === 6 ? digitsOnly : '';
+    }
+
+    function buildJoinLink(code) {
+      const url = new URL(window.location.origin + '/homework-join.html');
+      url.searchParams.set('assignmentId', code);
+      url.searchParams.set('autoJoin', '1');
+      return url.toString();
+    }
+
+    assignmentForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const code = sanitizeCode(quizCode.value);
+      if (!code) {
+        assignmentError.textContent = 'Enter the 6-digit quiz code from your library.';
+        return;
+      }
+      assignmentError.textContent = '';
+      socket.emit('homework:createAssignment', { quizId: code });
+    });
+
+    socket.on('homework:error', (message) => {
+      assignmentError.textContent = message;
+    });
+
+    socket.on('homework:assignmentCreated', ({ assignmentId, title, questionCount, questionDurations }) => {
+      latestAssignmentId = assignmentId;
+      assignmentResult.style.display = 'block';
+      assignmentTitle.textContent = title;
+      assignmentCode.textContent = assignmentId;
+      assignmentMeta.textContent = `${questionCount} question${questionCount === 1 ? '' : 's'} · Share this code with learners.`;
+      const estimated = questionDurations?.reduce((total, duration) => total + duration, 0) || 0;
+      durationHint.textContent = `Homework timing uses 20 seconds plus 10 seconds per word (about ${estimated} seconds total).`;
+    });
+
+    copyCodeBtn.addEventListener('click', () => {
+      if (!latestAssignmentId) return;
+      navigator.clipboard.writeText(latestAssignmentId);
+      copyCodeBtn.textContent = 'Copied!';
+      setTimeout(() => { copyCodeBtn.textContent = 'Copy code'; }, 1200);
+    });
+
+    copyLinkBtn.addEventListener('click', () => {
+      if (!latestAssignmentId) return;
+      navigator.clipboard.writeText(buildJoinLink(latestAssignmentId));
+      copyLinkBtn.textContent = 'Link copied!';
+      setTimeout(() => { copyLinkBtn.textContent = 'Copy join link'; }, 1200);
+    });
+  </script>
+</body>
+</html>

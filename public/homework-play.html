@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+  <title>Homework Mode</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="player-view">
+  <div class="glow"></div>
+  <main class="player-container">
+    <div class="player-status" id="lobby-status">Connecting to homework...</div>
+    <p id="join-error" class="error"></p>
+
+    <section class="question-board">
+      <div class="corner-badge" id="question-progress">Waiting to start...</div>
+      <div class="corner-badge timer" id="timer">--</div>
+      <div class="question-content">
+        <p class="eyebrow">Question</p>
+        <h1 id="question-text">Waiting for the assignment to start...</h1>
+        <div id="correct-answer-display" class="correct-answer" aria-live="polite"></div>
+        <div id="player-answer-display" class="player-answer" aria-live="polite"></div>
+        <div class="media-preview" id="question-media"></div>
+      </div>
+    </section>
+
+    <section class="response-panel">
+      <form id="answer-form" class="answer-card hidden" autocomplete="off">
+        <label>
+          Type your answer
+          <input
+            type="text"
+            id="answer-input"
+            name="homework-response-field"
+            autocomplete="new-password"
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck="false"
+          />
+        </label>
+        <button type="submit">Submit answer</button>
+      </form>
+
+      <div class="card leaderboard-card" id="leaderboard-card">
+        <div class="leaderboard-header">
+          <h2>Leaderboard</h2>
+          <p class="muted">Homework rankings</p>
+        </div>
+        <p id="answer-feedback"></p>
+        <ul id="leaderboard"></ul>
+      </div>
+    </section>
+  </main>
+
+  <div id="leaderboard-overlay" class="overlay hidden">
+    <div class="overlay-card">
+      <div class="leaderboard-header">
+        <h2>Leaderboard</h2>
+        <p id="overlay-hint" class="muted"></p>
+      </div>
+      <ul id="overlay-leaderboard"></ul>
+    </div>
+  </div>
+
+  <div id="answer-indicator" class="answer-indicator hidden" aria-live="assertive" aria-atomic="true"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const lobbyStatus = document.getElementById('lobby-status');
+    const joinError = document.getElementById('join-error');
+    const questionText = document.getElementById('question-text');
+    const timerEl = document.getElementById('timer');
+    const answerForm = document.getElementById('answer-form');
+    const answerInput = document.getElementById('answer-input');
+    const answerFeedback = document.getElementById('answer-feedback');
+    const leaderboard = document.getElementById('leaderboard');
+    const questionMedia = document.getElementById('question-media');
+    const questionProgress = document.getElementById('question-progress');
+    const overlay = document.getElementById('leaderboard-overlay');
+    const overlayList = document.getElementById('overlay-leaderboard');
+    const overlayHint = document.getElementById('overlay-hint');
+    const correctAnswerDisplay = document.getElementById('correct-answer-display');
+    const playerAnswerDisplay = document.getElementById('player-answer-display');
+    const answerIndicator = document.getElementById('answer-indicator');
+
+    let currentAssignmentId = null;
+    let timerInterval = null;
+    let hasJoinedOnce = false;
+    let lastSubmittedAnswer = '';
+    let playerHasAnswered = false;
+    let storedPlayerId = localStorage.getItem('homeworkPlayerId');
+    let storedCode = localStorage.getItem('homeworkCode');
+    let storedName = localStorage.getItem('homeworkName');
+
+    function generatePlayerId() {
+      if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+      return Math.random().toString(36).slice(2, 12);
+    }
+
+    if (!storedPlayerId) {
+      storedPlayerId = generatePlayerId();
+      localStorage.setItem('homeworkPlayerId', storedPlayerId);
+    }
+
+    function sanitizeCode(raw) {
+      const digitsOnly = raw?.trim().replace(/\D/g, '');
+      return digitsOnly && digitsOnly.length === 6 ? digitsOnly : '';
+    }
+
+    function joinAssignment(message = 'Joining homework...') {
+      storedName = localStorage.getItem('homeworkName');
+      storedCode = sanitizeCode(localStorage.getItem('homeworkCode'));
+
+      if (!storedName || !storedCode) {
+        window.location.href = '/homework-join.html';
+        return;
+      }
+
+      lobbyStatus.textContent = message;
+      socket.emit('homework:join', {
+        assignmentId: storedCode,
+        name: storedName,
+        playerId: storedPlayerId,
+      });
+    }
+
+    function attemptReconnect() {
+      lobbyStatus.textContent = 'Reconnecting to homework...';
+      socket.emit('homework:reconnect', {
+        playerId: storedPlayerId,
+        assignmentId: storedCode,
+      });
+    }
+
+    socket.on('connect', attemptReconnect);
+    socket.on('reconnect', attemptReconnect);
+
+    socket.on('homework:joined', ({ assignmentId, title, totalQuestions, playerId }) => {
+      currentAssignmentId = assignmentId;
+      if (playerId) {
+        storedPlayerId = playerId;
+        localStorage.setItem('homeworkPlayerId', playerId);
+        hasJoinedOnce = true;
+      }
+      if (assignmentId) {
+        storedCode = assignmentId;
+        localStorage.setItem('homeworkCode', assignmentId);
+      }
+      joinError.textContent = '';
+      lobbyStatus.textContent = `Joined "${title}". Get ready!`;
+      answerFeedback.textContent = '';
+      questionProgress.textContent = `0 of ${totalQuestions} questions`;
+    });
+
+    socket.on('homework:reconnected', ({ assignmentId, title, playerId, name }) => {
+      currentAssignmentId = assignmentId;
+      joinError.textContent = '';
+      lobbyStatus.textContent = `Reconnected to "${title}". Restoring your progress...`;
+      storedPlayerId = playerId;
+      storedName = name || storedName;
+      storedCode = assignmentId;
+      localStorage.setItem('homeworkPlayerId', storedPlayerId);
+      if (storedName) localStorage.setItem('homeworkName', storedName);
+      if (storedCode) localStorage.setItem('homeworkCode', storedCode);
+      hasJoinedOnce = true;
+    });
+
+    socket.on('homework:reconnectFailed', () => {
+      if (storedName && storedCode) {
+        joinAssignment('Rejoining homework...');
+      } else {
+        window.location.href = '/homework-join.html';
+      }
+    });
+
+    socket.on('homework:error', (message) => {
+      joinError.textContent = message;
+      lobbyStatus.textContent = 'Unable to join homework. Please try again.';
+    });
+
+    function renderMedia(media) {
+      questionMedia.innerHTML = '';
+      if (!media || !media.type || !media.src) return;
+      const el = media.type === 'video' ? document.createElement('video') : document.createElement('img');
+      el.src = media.src;
+      if (media.type === 'video') {
+        el.controls = true;
+      } else {
+        el.alt = media.name || 'Question media';
+      }
+      questionMedia.appendChild(el);
+    }
+
+    function updateLeaderboard(items) {
+      leaderboard.innerHTML = '';
+      items.forEach((entry, index) => {
+        const row = document.createElement('li');
+        row.innerHTML = `<span>${index + 1}. ${entry.name}</span><span>${entry.score} pts${
+          typeof entry.correctPercentage === 'number' ? ` · ${entry.correctPercentage}% correct` : ''
+        }</span>`;
+        leaderboard.appendChild(row);
+      });
+    }
+
+    function showOverlay(items, message = '') {
+      overlayList.innerHTML = '';
+      overlayHint.textContent = message;
+      items.forEach((entry, index) => {
+        const row = document.createElement('li');
+        row.innerHTML = `<span>${index + 1}. ${entry.name}</span><span>${entry.score} pts${
+          typeof entry.correctPercentage === 'number' ? ` · ${entry.correctPercentage}%` : ''
+        }</span>`;
+        overlayList.appendChild(row);
+      });
+      overlay.classList.remove('hidden');
+      setTimeout(() => {
+        overlay.classList.add('hidden');
+      }, 2500);
+    }
+
+    function stopTimer() {
+      if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+      }
+    }
+
+    function startTimer(seconds) {
+      stopTimer();
+      let remaining = seconds;
+      timerEl.textContent = `${remaining}s`;
+      timerInterval = setInterval(() => {
+        remaining -= 1;
+        timerEl.textContent = remaining > 0 ? `${remaining}s` : '0s';
+        if (remaining <= 0) stopTimer();
+      }, 1000);
+    }
+
+    socket.on('homework:state', ({ question, questionActive, timeRemaining, leaderboard: board }) => {
+      updateLeaderboard(board || []);
+      if (questionActive && question) {
+        questionProgress.textContent = `Question ${question.index} of ${question.total}`;
+        questionText.textContent = question.prompt;
+        renderMedia(question.media);
+        answerForm.classList.remove('hidden');
+        playerHasAnswered = false;
+        correctAnswerDisplay.textContent = '';
+        playerAnswerDisplay.textContent = '';
+        startTimer(timeRemaining || question.duration || 0);
+      } else {
+        answerForm.classList.add('hidden');
+        timerEl.textContent = '--';
+      }
+    });
+
+    socket.on('homework:questionStart', ({ prompt, index, total, duration, media }) => {
+      questionProgress.textContent = `Question ${index} of ${total}`;
+      questionText.textContent = prompt;
+      answerFeedback.textContent = '';
+      answerFeedback.className = '';
+      playerHasAnswered = false;
+      correctAnswerDisplay.textContent = '';
+      playerAnswerDisplay.textContent = '';
+      renderMedia(media);
+      answerForm.classList.remove('hidden');
+      answerInput.disabled = false;
+      answerInput.value = '';
+      answerInput.focus();
+      startTimer(duration);
+    });
+
+    socket.on('homework:questionEnd', ({ correctAnswer }) => {
+      answerForm.classList.add('hidden');
+      timerEl.textContent = '--';
+      correctAnswerDisplay.textContent = correctAnswer ? `Correct answer: ${correctAnswer}` : '';
+      if (playerHasAnswered) {
+        playerAnswerDisplay.textContent = `You answered: ${lastSubmittedAnswer || 'No answer'}`;
+      }
+    });
+
+    socket.on('homework:leaderboard', (items) => {
+      updateLeaderboard(items || []);
+      showOverlay(items || [], 'Next question starting...');
+    });
+
+    socket.on('homework:finished', ({ leaderboard: results, totalQuestions }) => {
+      updateLeaderboard(results || []);
+      const message = `Completed homework · ${totalQuestions} questions`;
+      overlay.classList.remove('hidden');
+      overlayHint.textContent = message;
+      overlayList.innerHTML = '';
+      (results || []).forEach((entry, index) => {
+        const row = document.createElement('li');
+        row.innerHTML = `<span>${index + 1}. ${entry.name}</span><span>${entry.score} pts · ${entry.correctPercentage}% correct</span>`;
+        overlayList.appendChild(row);
+      });
+      lobbyStatus.textContent = 'Homework finished! Check your results.';
+    });
+
+    socket.on('homework:answerResult', ({ correct, partial, earned, correctAnswer, playerAnswer }) => {
+      playerHasAnswered = true;
+      lastSubmittedAnswer = playerAnswer;
+      answerInput.disabled = true;
+      const classes = ['muted'];
+      if (correct) {
+        answerFeedback.textContent = `Correct! +${earned} pts`;
+        classes.push('correct');
+        answerIndicator.textContent = 'Correct';
+        answerIndicator.classList.remove('hidden');
+        answerIndicator.classList.add('correct');
+      } else if (partial) {
+        answerFeedback.textContent = `Close! +${earned} pts`;
+        classes.push('partial');
+        answerIndicator.textContent = 'Close';
+        answerIndicator.classList.remove('hidden');
+        answerIndicator.classList.add('partial');
+      } else {
+        answerFeedback.textContent = 'Not quite.';
+        classes.push('incorrect');
+        answerIndicator.textContent = 'Incorrect';
+        answerIndicator.classList.remove('hidden');
+        answerIndicator.classList.add('incorrect');
+      }
+      answerFeedback.className = classes.join(' ');
+      correctAnswerDisplay.textContent = correctAnswer ? `Correct answer: ${correctAnswer}` : '';
+      playerAnswerDisplay.textContent = playerAnswer ? `You answered: ${playerAnswer}` : '';
+      setTimeout(() => answerIndicator.classList.add('hidden'), 1200);
+    });
+
+    answerForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      if (!currentAssignmentId) return;
+      const answer = answerInput.value.trim();
+      socket.emit('homework:answer', { assignmentId: currentAssignmentId, answer });
+    });
+
+    // Kick off the join once the page loads with stored details.
+    joinAssignment();
+  </script>
+</body>
+</html>
