@@ -10,7 +10,7 @@
   <div class="glow"></div>
   <header>
     <h1>Launch a homework assignment</h1>
-    <p>Generate a stand-alone assignment code that mirrors the player experience without affecting live games.</p>
+    <p>Generate a stand-alone assignment code that mirrors the player experience without affecting live games. Learners only need the assignment link—no live host required.</p>
     <div class="cta-row">
       <a class="button ghost" href="/">Back to library</a>
       <a class="button ghost" href="/homework-join.html">Learner join page</a>
@@ -39,10 +39,11 @@
           </div>
           <div class="cta-row">
             <button type="button" id="copy-code" class="copy">Copy code</button>
-            <button type="button" id="copy-link" class="ghost">Copy join link</button>
+            <button type="button" id="copy-link" class="ghost">Copy shareable link</button>
           </div>
         </div>
         <p class="muted" id="duration-hint"></p>
+        <p class="muted">Send the shareable link so learners can start on their own—it's fully independent from the live host.</p>
       </div>
     </section>
   </main>
@@ -69,7 +70,7 @@
     }
 
     function buildJoinLink(code) {
-      const url = new URL(window.location.origin + '/homework-join.html');
+      const url = new URL('/homework-join.html', window.location.href);
       url.searchParams.set('assignmentId', code);
       url.searchParams.set('autoJoin', '1');
       return url.toString();
@@ -111,8 +112,8 @@
       if (!latestAssignmentId) return;
       navigator.clipboard.writeText(buildJoinLink(latestAssignmentId));
       copyLinkBtn.textContent = 'Link copied!';
-      setTimeout(() => { copyLinkBtn.textContent = 'Copy join link'; }, 1200);
-    });
-  </script>
-</body>
+        setTimeout(() => { copyLinkBtn.textContent = 'Copy shareable link'; }, 1200);
+      });
+    </script>
+  </body>
 </html>

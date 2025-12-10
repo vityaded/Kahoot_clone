@@ -13,6 +13,7 @@
     <p>Enter the assignment code and your nickname to start the self-paced quiz.</p>
     <div class="cta-row">
       <a class="button ghost" href="/">Back to library</a>
+      <button type="button" id="copy-join-link" class="ghost">Copy assignments link</button>
     </div>
   </header>
 
@@ -29,6 +30,7 @@
         </label>
         <button type="submit">Start homework</button>
         <p id="join-error" class="error"></p>
+        <p id="link-hint" class="muted"></p>
       </form>
     </section>
   </main>
@@ -38,10 +40,21 @@
     const assignmentInput = document.getElementById('assignment-code');
     const nameInput = document.getElementById('player-name');
     const joinError = document.getElementById('join-error');
+    const linkHint = document.getElementById('link-hint');
+    const copyJoinLinkBtn = document.getElementById('copy-join-link');
 
     function sanitizeCode(raw) {
       const digitsOnly = raw?.trim().replace(/\D/g, '');
       return digitsOnly && digitsOnly.length === 6 ? digitsOnly : '';
+    }
+
+    function buildShareLink(code = '') {
+      const url = new URL('/homework-join.html', window.location.href);
+      if (code) {
+        url.searchParams.set('assignmentId', code);
+        url.searchParams.set('autoJoin', '1');
+      }
+      return url.toString();
     }
 
     joinForm.addEventListener('submit', (event) => {
@@ -66,15 +79,30 @@
     const paramCode = sanitizeCode(params.get('assignmentId'));
     const autoJoin = params.get('autoJoin') === '1';
 
+    if (copyJoinLinkBtn) {
+      copyJoinLinkBtn.addEventListener('click', () => {
+        const code = sanitizeCode(assignmentInput.value) || sanitizeCode(localStorage.getItem('homeworkCode'));
+        navigator.clipboard.writeText(buildShareLink(code));
+        copyJoinLinkBtn.textContent = 'Link copied!';
+        setTimeout(() => { copyJoinLinkBtn.textContent = 'Copy assignments link'; }, 1200);
+      });
+    }
+
     if (paramCode) {
       assignmentInput.value = paramCode;
+      assignmentInput.readOnly = true;
+      assignmentInput.setAttribute('aria-readonly', 'true');
+      localStorage.setItem('homeworkCode', paramCode);
+      linkHint.textContent = 'This link already contains the assignment code. Add your nickname and start.';
+
       if (autoJoin) {
-        localStorage.setItem('homeworkCode', paramCode);
-        if (nameInput.value?.trim()) {
-          localStorage.setItem('homeworkName', nameInput.value.trim());
+        const storedName = localStorage.getItem('homeworkName');
+        if (storedName) {
+          window.location.href = '/homework-play.html';
         }
-        window.location.href = '/homework-play.html';
       }
+    } else {
+      linkHint.textContent = 'Share an assignment link so learners never need to track a host.';
     }
   </script>
 </body>
