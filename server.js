@@ -4,6 +4,11 @@ import { Server } from 'socket.io';
 import { customAlphabet, nanoid } from 'nanoid';
 import { promises as fs } from 'fs';
 import path from 'path';
+import {
+  evaluateAnswer,
+  normalise,
+  scoreSubmission,
+} from './server/evaluation.js';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const DATA_FILE = path.join(DATA_DIR, 'quizzes.json');
@@ -22,7 +27,6 @@ const sessions = new Map();
 const playerSessions = new Map();
 const homeworkSessions = new Map();
 const generateQuizCode = customAlphabet('0123456789', 6);
-const synonymCache = new Map();
 
 app.use(express.json());
 
@@ -66,89 +70,6 @@ function buildMediaPayload(media) {
   };
 }
 
-function normalise(text = '') {
-  return text.trim().toLowerCase();
-}
-
-function levenshtein(a, b) {
-  if (a === b) return 0;
-  if (!a.length) return b.length;
-  if (!b.length) return a.length;
-
-  const matrix = Array.from({ length: a.length + 1 }, (_, i) => [i]);
-  for (let j = 1; j <= b.length; j += 1) {
-    matrix[0][j] = j;
-  }
-
-  for (let i = 1; i <= a.length; i += 1) {
-    for (let j = 1; j <= b.length; j += 1) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      matrix[i][j] = Math.min(
-        matrix[i - 1][j] + 1,
-        matrix[i][j - 1] + 1,
-        matrix[i - 1][j - 1] + cost,
-      );
-    }
-  }
-
-  return matrix[a.length][b.length];
-}
-
-function similarity(a, b) {
-  if (!a && !b) return 1;
-  if (!a || !b) return 0;
-  const distance = levenshtein(a, b);
-  const maxLen = Math.max(a.length, b.length) || 1;
-  return 1 - distance / maxLen;
-}
-
-function isCloseMatch(submitted, expected) {
-  const distance = levenshtein(submitted, expected);
-  const maxLen = Math.max(submitted.length, expected.length) || 1;
-  const closeness = 1 - distance / maxLen;
-
-  if (closeness >= 0.8) return true;
-  if (distance === 1 && Math.min(submitted.length, expected.length) >= 3) return true;
-  if (distance === 2 && maxLen >= 6 && closeness >= 0.7) return true;
-
-  if (submitted.length >= 5 && expected.includes(submitted)) return true;
-  if (expected.length >= 5 && submitted.includes(expected)) return true;
-
-  return false;
-}
-
-async function fetchSynonyms(word) {
-  const normalized = normalise(word);
-  if (!normalized) return [];
-  if (synonymCache.has(normalized)) return synonymCache.get(normalized);
-
-  try {
-    const response = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(normalized)}`);
-    if (!response.ok) {
-      synonymCache.set(normalized, []);
-      return [];
-    }
-
-    const payload = await response.json();
-    const synonyms = new Set();
-    payload?.forEach((entry) => {
-      entry?.meanings?.forEach((meaning) => {
-        meaning?.synonyms?.forEach((syn) => synonyms.add(normalise(syn)));
-        meaning?.definitions?.forEach((definition) => {
-          definition?.synonyms?.forEach((syn) => synonyms.add(normalise(syn)));
-        });
-      });
-    });
-
-    const result = Array.from(synonyms).filter(Boolean);
-    synonymCache.set(normalized, result);
-    return result;
-  } catch (_error) {
-    synonymCache.set(normalized, []);
-    return [];
-  }
-}
-
 function formatLeaderboard(session) {
   return Array.from(session.players.values())
     .sort((a, b) => b.score - a.score)
@@ -188,43 +109,24 @@ function findHomeworkSession(homeworkId) {
   return homeworkSessions.get(homeworkId.trim().toUpperCase()) || null;
 }
 
-function evaluateHomeworkSubmission(session, answers = []) {
+async function evaluateHomeworkSubmission(session, answers = []) {
   const template = quizTemplates.get(session.templateId);
   if (!template) return { score: 0, responses: [] };
-  const responses = Array.isArray(answers) ? answers : [];
 
-  let score = 0;
-  const detailedResponses = template.questions.map((question, index) => {
-    const rawSubmission = responses[index] ?? '';
-    const submission = normalise(rawSubmission);
-    const normalizedExpected = [question.answer, ...(question.alternateAnswers || [])].map(normalise);
-    const normalizedPartial = (question.partialAnswers || []).map(normalise);
-
-    const isCorrect = normalizedExpected.includes(submission);
-    const isPartial = !isCorrect && (normalizedPartial.includes(submission) || normalizedExpected.some((expected) => isCloseMatch(submission, expected)));
-
-    if (isCorrect) score += 1000;
-    else if (isPartial) score += 500;
-
-    return {
-      prompt: question.prompt,
-      submitted: typeof rawSubmission === 'string' ? rawSubmission : String(rawSubmission ?? ''),
-      correctAnswer: question.answer,
-      isCorrect,
-    };
+  const evaluation = await scoreSubmission(template.questions, Array.isArray(answers) ? answers : [], {
+    includeSpeedBonus: false,
   });
-
-  return { score, responses: detailedResponses };
+  return evaluation;
 }
 
-function scoreHomeworkSubmission(session, answers = []) {
-  const evaluation = evaluateHomeworkSubmission(session, answers);
+async function scoreHomeworkSubmission(session, answers = []) {
+  const evaluation = await evaluateHomeworkSubmission(session, answers);
   return evaluation.score;
 }
 
-function recordHomeworkSubmission(session, name, answers = []) {
+async function recordHomeworkSubmission(session, name, answers = []) {
   if (!name?.trim()) return null;
-  const evaluation = evaluateHomeworkSubmission(session, answers);
+  const evaluation = await evaluateHomeworkSubmission(session, answers);
   const score = evaluation.score;
   const key = normalise(name) || name;
   const existing = session.submissions.get(key);
@@ -630,44 +532,19 @@ io.on('connection', (socket) => {
     const questionDuration = resolveQuestionDuration(session);
     const durationMs = questionDuration * 1000;
     const timeRemaining = Math.max(0, durationMs - elapsedMs);
+    const evaluation = await evaluateAnswer(currentQuestion, submitted, {
+      durationMs,
+      timeRemainingMs: timeRemaining,
+      includeSpeedBonus: true,
+    });
 
-    const expectedAnswers = [currentQuestion.answer, ...(currentQuestion.alternateAnswers || [])];
-    const normalizedSubmitted = normalise(submitted);
-    const normalizedExpected = expectedAnswers.map(normalise);
-    const normalizedPartial = (currentQuestion.partialAnswers || []).map(normalise);
-
-    const normalizedSynonyms = Array.from(
-      new Set(
-        (
-          await Promise.all(
-            expectedAnswers.map((expected) => fetchSynonyms(expected)),
-          )
-        )
-          .flat()
-          .filter(Boolean),
-      ),
-    );
-
-    const isCorrect = normalizedExpected.some((expected) => normalizedSubmitted === expected);
-    const isPartial =
-      !isCorrect &&
-      (normalizedPartial.includes(normalizedSubmitted) ||
-        normalizedSynonyms.includes(normalizedSubmitted) ||
-        normalizedSynonyms.some((syn) => isCloseMatch(normalizedSubmitted, syn)) ||
-        normalizedExpected.some((expected) => isCloseMatch(normalizedSubmitted, expected)));
-    let earned = 0;
-    if (isCorrect || isPartial) {
-      const speedBonus = Math.round((timeRemaining / durationMs) * 500);
-      const baseScore = 1000 + speedBonus;
-      earned = isCorrect ? baseScore : Math.round(baseScore / 2);
-      player.score += earned;
-    }
+    player.score += evaluation.earned;
 
     session.answers.add(player.id);
     socket.emit('player:answerResult', {
-      correct: isCorrect,
-      partial: isPartial,
-      earned,
+      correct: evaluation.isCorrect,
+      partial: evaluation.isPartial,
+      earned: evaluation.earned,
       correctAnswer: currentQuestion.answer,
       playerAnswer: submitted,
     });
@@ -829,7 +706,7 @@ app.get('/api/homework/:homeworkId/leaderboard', (req, res) => {
   res.json(formatHomeworkLeaderboard(session));
 });
 
-app.post('/api/homework/:homeworkId/submit', (req, res) => {
+app.post('/api/homework/:homeworkId/submit', async (req, res) => {
   const session = findHomeworkSession(req.params.homeworkId);
   if (!session) {
     res.status(404).json({ error: 'Homework not found' });
@@ -842,7 +719,7 @@ app.post('/api/homework/:homeworkId/submit', (req, res) => {
     return;
   }
 
-  const submission = recordHomeworkSubmission(session, playerName, answers);
+  const submission = await recordHomeworkSubmission(session, playerName, answers);
   const leaderboard = formatHomeworkLeaderboard(session);
   const review = (submission?.responses || [])
     .filter((entry) => !entry.isCorrect)
