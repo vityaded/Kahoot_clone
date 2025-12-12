@@ -413,6 +413,14 @@ button:disabled {
   white-space: nowrap;
 }
 
+.share-row {
+  margin-top: 14px;
+}
+
+.share-input {
+  width: 100%;
+}
+
 .button.ghost,
 button.ghost {
   background: transparent;
