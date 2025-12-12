@@ -60,9 +60,12 @@
         <p><strong>Quiz template:</strong> <span id="homework-quiz"></span></p>
         <p><strong>Created:</strong> <span id="homework-created"></span></p>
         <p><strong>Due:</strong> <span id="homework-due">No due date</span></p>
-        <div class="cta-row">
-          <a id="homework-link" class="button" href="#" target="_blank">Open homework link</a>
-          <button id="copy-homework-link" type="button" class="ghost">Copy link</button>
+        <div class="share-row">
+          <label class="muted" for="homework-link-display">Homework link</label>
+          <div class="inline-input share-input">
+            <input id="homework-link-display" type="text" readonly />
+            <button id="copy-homework-link" type="button" class="ghost">Copy link</button>
+          </div>
         </div>
       </div>
     </section>
@@ -96,11 +99,38 @@
     const homeworkQuizEl = document.getElementById('homework-quiz');
     const homeworkCreatedEl = document.getElementById('homework-created');
     const homeworkDueEl = document.getElementById('homework-due');
-    const homeworkLinkEl = document.getElementById('homework-link');
+    const homeworkLinkInput = document.getElementById('homework-link-display');
     const copyLinkBtn = document.getElementById('copy-homework-link');
     const leaderboardList = document.getElementById('leaderboard');
     const leaderboardEmpty = document.getElementById('leaderboard-empty');
     const refreshLeaderboardBtn = document.getElementById('refresh-leaderboard');
+
+    async function copyToClipboard(text) {
+      if (navigator.clipboard?.writeText) {
+        return navigator.clipboard.writeText(text);
+      }
+
+      return new Promise((resolve, reject) => {
+        try {
+          const tempInput = document.createElement('textarea');
+          tempInput.value = text;
+          tempInput.setAttribute('readonly', '');
+          tempInput.style.position = 'fixed';
+          tempInput.style.opacity = '0';
+          document.body.appendChild(tempInput);
+          tempInput.select();
+          const successful = document.execCommand('copy');
+          document.body.removeChild(tempInput);
+          if (successful) {
+            resolve();
+          } else {
+            reject(new Error('Copy command was blocked'));
+          }
+        } catch (error) {
+          reject(error);
+        }
+      });
+    }
 
     function formatDate(timestamp) {
       if (!timestamp) return 'No due date';
@@ -162,12 +192,25 @@
       homeworkCreatedEl.textContent = formatDate(session.createdAt);
       homeworkDueEl.textContent = formatDate(session.dueAt);
       const link = buildShareUrl(session.id);
-      homeworkLinkEl.href = link;
-      homeworkLinkEl.textContent = 'Open homework link';
+      homeworkLinkInput.value = link;
       copyLinkBtn.onclick = () => {
-        navigator.clipboard.writeText(link);
-        copyLinkBtn.textContent = 'Copied!';
-        setTimeout(() => { copyLinkBtn.textContent = 'Copy link'; }, 1200);
+        copyLinkBtn.disabled = true;
+        copyLinkBtn.textContent = 'Copying...';
+        copyToClipboard(link)
+          .then(() => {
+            copyLinkBtn.textContent = 'Copied!';
+          })
+          .catch(() => {
+            homeworkLinkInput.focus();
+            homeworkLinkInput.select();
+            copyLinkBtn.textContent = 'Copy failed';
+          })
+          .finally(() => {
+            setTimeout(() => {
+              copyLinkBtn.textContent = 'Copy link';
+              copyLinkBtn.disabled = false;
+            }, 1400);
+          });
       };
       refreshLeaderboardBtn.disabled = false;
     }
