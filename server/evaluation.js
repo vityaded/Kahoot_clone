@@ -30,14 +30,14 @@ function levenshtein(a, b) {
   return matrix[left.length][right.length];
 }
 
-export function isCloseMatch(submitted, expected) {
+export function isCloseMatch(submitted, expected, threshold = 0.8) {
   const distance = levenshtein(submitted, expected);
   const maxLen = Math.max(submitted.length, expected.length) || 1;
   const closeness = 1 - distance / maxLen;
 
-  if (closeness >= 0.8) return true;
+  if (closeness >= threshold) return true;
   if (distance === 1 && Math.min(submitted.length, expected.length) >= 3) return true;
-  if (distance === 2 && maxLen >= 6 && closeness >= 0.7) return true;
+  if (distance === 2 && maxLen >= 6 && closeness >= Math.max(0.6, threshold - 0.1)) return true;
 
   if (submitted.length >= 5 && expected.includes(submitted)) return true;
   if (expected.length >= 5 && submitted.includes(expected)) return true;
@@ -97,6 +97,7 @@ export async function evaluateAnswer(question, submission, options = {}) {
     durationMs = null,
     timeRemainingMs = null,
     includeSpeedBonus = true,
+    similarityThreshold = 0.8,
   } = options;
 
   const expectedAnswers = [question.answer, ...(question.alternateAnswers || [])];
@@ -110,8 +111,8 @@ export async function evaluateAnswer(question, submission, options = {}) {
     !isCorrect &&
     (normalizedPartial.includes(normalizedSubmitted) ||
       normalizedSynonyms.includes(normalizedSubmitted) ||
-      normalizedSynonyms.some((syn) => isCloseMatch(normalizedSubmitted, syn)) ||
-      normalizedExpected.some((expected) => isCloseMatch(normalizedSubmitted, expected)));
+      normalizedSynonyms.some((syn) => isCloseMatch(normalizedSubmitted, syn, similarityThreshold)) ||
+      normalizedExpected.some((expected) => isCloseMatch(normalizedSubmitted, expected, similarityThreshold)));
 
   const speedBonus = calculateSpeedBonus(durationMs, timeRemainingMs, includeSpeedBonus);
   const baseScore = 1000 + speedBonus;

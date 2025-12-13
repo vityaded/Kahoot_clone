@@ -55,6 +55,18 @@ CREATE TABLE IF NOT EXISTS reviews (
   PRIMARY KEY (user_id, card_id)
 );
 
+CREATE TABLE IF NOT EXISTS card_progress (
+  user_id TEXT NOT NULL,
+  card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+  state TEXT NOT NULL DEFAULT 'new',
+  ease NUMERIC NOT NULL DEFAULT 2.5,
+  interval_days INTEGER NOT NULL DEFAULT 0,
+  learning_step INTEGER NOT NULL DEFAULT 0,
+  lapses INTEGER NOT NULL DEFAULT 0,
+  due_at TIMESTAMPTZ,
+  PRIMARY KEY (user_id, card_id)
+);
+
 CREATE TABLE IF NOT EXISTS flags (
   id SERIAL PRIMARY KEY,
   deck_id TEXT NOT NULL REFERENCES decks(id) ON DELETE CASCADE,

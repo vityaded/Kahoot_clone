@@ -2,6 +2,13 @@ import { customAlphabet, nanoid } from 'nanoid';
 import path from 'path';
 import { runMigrations, withClient } from './db.js';
 
+export const LEARNING_STEPS_MINUTES = [1, 10];
+export const LEARNING_GRADUATE_DAYS = 3;
+const DEFAULT_EASE = 2.5;
+const MIN_EASE = 1.3;
+const EASE_BONUS = 0.05;
+const EASE_PENALTY = 0.2;
+
 const generateToken = customAlphabet('123456789ABCDEFGHJKLMNPQRSTUVWXYZ', 12);
 
 function mapDeckRow(row) {
@@ -29,6 +36,23 @@ function mapCardRow(row) {
     subtitle: row.subtitle,
     media,
   };
+}
+
+function mapProgressRow(row) {
+  const hasProgress = row && (row.state || row.ease || row.interval_days || row.learning_step || row.lapses);
+  return {
+    state: hasProgress ? row.state : 'new',
+    ease: Number(hasProgress ? row.ease : DEFAULT_EASE) || DEFAULT_EASE,
+    intervalDays: Number(hasProgress ? row.interval_days : 0) || 0,
+    learningStep: Number(hasProgress ? row.learning_step : 0) || 0,
+    lapses: Number(hasProgress ? row.lapses : 0) || 0,
+    dueAt: row?.due_at ? new Date(row.due_at).getTime() : null,
+  };
+}
+
+function mapCardWithProgress(row) {
+  const card = mapCardRow(row);
+  return { ...card, progress: mapProgressRow(row) };
 }
 
 export async function loadState() {
@@ -205,37 +229,92 @@ async function getDeckSession(userId, deckId, today) {
   return rows[0];
 }
 
+function minutesFromNow(minutes) {
+  return new Date(Date.now() + minutes * 60 * 1000);
+}
+
+function daysFromNow(days) {
+  return new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+}
+
+async function ensureProgress(userId, cardIds = []) {
+  if (!cardIds.length) return;
+  await withClient((client) =>
+    Promise.all(
+      cardIds.map((cardId) =>
+        client.query(
+          `INSERT INTO card_progress (user_id, card_id, state, due_at)
+           VALUES ($1, $2, 'new', NOW())
+           ON CONFLICT (user_id, card_id) DO NOTHING`,
+          [String(userId), cardId],
+        ),
+      ),
+    ),
+  );
+}
+
 export async function claimCards(deckId, userId, limit) {
   const deck = await getDeck(deckId);
   if (!deck || deck.disabled) return [];
 
   const today = new Date().toISOString().slice(0, 10);
   const session = await getDeckSession(userId, deckId, today);
-  const available = Math.min(deck.newPerDay - session.today_new, limit);
-  if (available <= 0) return [];
 
-  const { rows: cards } = await withClient((client) =>
+  const now = new Date();
+  const { rows: dueRows } = await withClient((client) =>
     client.query(
-      `SELECT id, prompt, answer, subtitle, media_type, media_src, media_name
-       FROM cards
-       WHERE deck_id = $1
-       ORDER BY position ASC
-       OFFSET $2 LIMIT $3`,
-      [deckId, session.cursor, available],
+      `SELECT c.id, c.prompt, c.answer, c.subtitle, c.media_type, c.media_src, c.media_name,
+              cp.state, cp.ease, cp.interval_days, cp.learning_step, cp.lapses, cp.due_at
+       FROM card_progress cp
+       JOIN cards c ON c.id = cp.card_id
+       WHERE cp.user_id = $1
+         AND c.deck_id = $2
+         AND cp.state IN ('learning', 'review')
+         AND (cp.due_at IS NULL OR cp.due_at <= $3)
+       ORDER BY cp.due_at ASC NULLS FIRST
+       LIMIT $4`,
+      [String(userId), deckId, now, limit],
     ),
   );
 
-  const claimed = cards.map(mapCardRow);
-  await withClient((client) =>
+  const dueCards = dueRows.map(mapCardWithProgress);
+  let remaining = limit - dueCards.length;
+  if (remaining <= 0) return dueCards;
+
+  const newAvailable = Math.min(deck.newPerDay - session.today_new, remaining);
+  if (newAvailable <= 0) return dueCards;
+
+  const { rows: newRows } = await withClient((client) =>
     client.query(
-      `UPDATE study_sessions
-       SET cursor = cursor + $1, today_new = today_new + $1
-       WHERE user_id = $2 AND deck_id = $3 AND study_date = $4`,
-      [claimed.length, String(userId), deckId, today],
+      `SELECT c.id, c.prompt, c.answer, c.subtitle, c.media_type, c.media_src, c.media_name,
+              cp.state, cp.ease, cp.interval_days, cp.learning_step, cp.lapses, cp.due_at
+       FROM cards c
+       LEFT JOIN card_progress cp ON cp.card_id = c.id AND cp.user_id = $2
+       WHERE c.deck_id = $1
+         AND COALESCE(cp.state, 'new') = 'new'
+         AND COALESCE(cp.state <> 'suspended', TRUE)
+       ORDER BY c.position ASC
+       LIMIT $3`,
+      [deckId, String(userId), newAvailable],
     ),
   );
 
-  return claimed;
+  const newCardIds = newRows.map((row) => row.id);
+  await ensureProgress(userId, newCardIds);
+
+  if (newCardIds.length) {
+    await withClient((client) =>
+      client.query(
+        `UPDATE study_sessions
+         SET today_new = today_new + $1
+         WHERE user_id = $2 AND deck_id = $3 AND study_date = $4`,
+        [newCardIds.length, String(userId), deckId, today],
+      ),
+    );
+  }
+
+  const newCards = newRows.map(mapCardWithProgress);
+  return [...dueCards, ...newCards].slice(0, limit);
 }
 
 export async function recordScore(deckId, userId, deltaScore, cardId) {
@@ -262,6 +341,99 @@ export async function recordScore(deckId, userId, deltaScore, cardId) {
       ),
     );
   }
+}
+
+export async function updateCardProgress(deckId, userId, cardId, evaluation) {
+  const userKey = String(userId);
+  const isPassing = evaluation.isCorrect || evaluation.isPartial;
+  return withClient(async (client) => {
+    const { rows: existingRows } = await client.query(
+      `INSERT INTO card_progress (user_id, card_id, state, due_at)
+       VALUES ($1, $2, 'new', NOW())
+       ON CONFLICT (user_id, card_id) DO UPDATE SET state = card_progress.state
+       RETURNING *`,
+      [userKey, cardId],
+    );
+
+    const progress = mapProgressRow(existingRows[0]);
+    if (progress.state === 'suspended') return progress;
+
+    let nextState = progress.state || 'new';
+    let nextEase = progress.ease || DEFAULT_EASE;
+    let nextInterval = progress.intervalDays || 0;
+    let nextLearningStep = progress.learningStep || 0;
+    let nextLapses = progress.lapses || 0;
+    let nextDue = new Date();
+
+    if (progress.state === 'review') {
+      if (isPassing) {
+        nextEase = Math.max(MIN_EASE, progress.ease + EASE_BONUS);
+        const baseInterval = progress.intervalDays || LEARNING_GRADUATE_DAYS;
+        nextInterval = Math.max(LEARNING_GRADUATE_DAYS, Math.round(baseInterval * nextEase));
+        nextDue = daysFromNow(nextInterval);
+        nextLearningStep = 0;
+        nextState = 'review';
+      } else {
+        nextEase = Math.max(MIN_EASE, progress.ease - EASE_PENALTY);
+        nextLapses += 1;
+        nextInterval = 0;
+        nextLearningStep = 0;
+        nextDue = minutesFromNow(LEARNING_STEPS_MINUTES[0]);
+        nextState = 'learning';
+      }
+    } else {
+      const nextStep = progress.learningStep + (isPassing ? 1 : 0);
+      if (isPassing && nextStep >= LEARNING_STEPS_MINUTES.length) {
+        nextState = 'review';
+        nextInterval = LEARNING_GRADUATE_DAYS;
+        nextDue = daysFromNow(nextInterval);
+        nextLearningStep = 0;
+      } else {
+        nextState = 'learning';
+        nextLearningStep = isPassing ? nextStep : 0;
+        const stepIndex = Math.min(nextLearningStep, LEARNING_STEPS_MINUTES.length - 1);
+        nextDue = minutesFromNow(LEARNING_STEPS_MINUTES[stepIndex]);
+      }
+    }
+
+    const { rows: updated } = await client.query(
+      `UPDATE card_progress
+       SET state = $3,
+           ease = $4,
+           interval_days = $5,
+           learning_step = $6,
+           lapses = $7,
+           due_at = $8
+       WHERE user_id = $1 AND card_id = $2
+       RETURNING *`,
+      [userKey, cardId, nextState, nextEase, nextInterval, nextLearningStep, nextLapses, nextDue],
+    );
+
+    if (evaluation?.isCorrect && cardId) {
+      await client.query('UPDATE reviews SET last_reviewed = NOW() WHERE user_id = $1 AND card_id = $2', [
+        userKey,
+        cardId,
+      ]);
+    }
+
+    return mapProgressRow(updated[0]);
+  });
+}
+
+export async function suspendCardForUser(deckId, cardId, userId) {
+  const userKey = String(userId);
+  await ensureProgress(userId, [cardId]);
+  const { rows } = await withClient((client) =>
+    client.query(
+      `UPDATE card_progress
+       SET state = 'suspended', interval_days = 0, learning_step = 0, lapses = lapses, due_at = NULL
+       WHERE user_id = $1 AND card_id = $2
+       RETURNING *`,
+      [userKey, cardId],
+    ),
+  );
+  await recordBadCard(deckId, cardId, userId);
+  return mapProgressRow(rows[0]);
 }
 
 export async function exportStats(deckId) {
