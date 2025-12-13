@@ -73,6 +73,23 @@ function mapCardWithProgress(row) {
   return { ...card, progress: mapProgressRow(row) };
 }
 
+function mapSessionRow(row) {
+  return {
+    id: row?.id || null,
+    cardQueue: Array.isArray(row?.card_queue)
+      ? row.card_queue
+      : row?.card_queue
+        ? JSON.parse(row.card_queue)
+        : [],
+    cursor: Number(row?.cursor) || 0,
+    todayNew: Number(row?.today_new) || 0,
+    attempts: Number(row?.attempts) || 0,
+    score: Number(row?.score) || 0,
+    currentCardId: row?.current_card_id || null,
+    studyDate: row?.study_date || null,
+  };
+}
+
 export async function loadState() {
   await runMigrations();
 }
@@ -244,7 +261,7 @@ async function getDeckSession(userId, deckId, today) {
       [String(userId), deckId, today],
     ),
   );
-  return rows[0];
+  return mapSessionRow(rows[0]);
 }
 
 function minutesFromNow(minutes) {
@@ -271,12 +288,35 @@ async function ensureProgress(userId, cardIds = []) {
   );
 }
 
+async function getCardsByIds(cardIds = [], userId) {
+  if (!cardIds.length) return [];
+
+  const { rows } = await withClient((client) =>
+    client.query(
+      `SELECT c.id, c.prompt, c.answer, c.subtitle, c.media_type, c.media_src, c.media_name,
+              cp.state, cp.ease, cp.interval_days, cp.learning_step, cp.lapses, cp.due_at
+       FROM cards c
+       LEFT JOIN card_progress cp ON cp.card_id = c.id AND cp.user_id = $2
+       WHERE c.id = ANY($1)
+       ORDER BY array_position($1::text[], c.id)`,
+      [cardIds, String(userId)],
+    ),
+  );
+
+  return rows.map(mapCardWithProgress);
+}
+
 export async function claimCards(deckId, userId, limit) {
   const deck = await getDeck(deckId);
-  if (!deck || deck.disabled) return [];
+  if (!deck || deck.disabled) return { cards: [], session: null };
 
   const today = new Date().toISOString().slice(0, 10);
   const session = await getDeckSession(userId, deckId, today);
+
+  if (session.cardQueue.length) {
+    const cards = await getCardsByIds(session.cardQueue, userId);
+    return { cards, session };
+  }
 
   const now = new Date();
   const { rows: dueRows } = await withClient((client) =>
@@ -297,10 +337,10 @@ export async function claimCards(deckId, userId, limit) {
 
   const dueCards = dueRows.map(mapCardWithProgress);
   let remaining = limit - dueCards.length;
-  if (remaining <= 0) return dueCards;
+  if (remaining <= 0) return { cards: dueCards, session };
 
-  const newAvailable = Math.min(deck.newPerDay - session.today_new, remaining);
-  if (newAvailable <= 0) return dueCards;
+  const newAvailable = Math.min(deck.newPerDay - session.todayNew, remaining);
+  if (newAvailable <= 0) return { cards: dueCards, session };
 
   const { rows: newRows } = await withClient((client) =>
     client.query(
@@ -332,7 +372,34 @@ export async function claimCards(deckId, userId, limit) {
   }
 
   const newCards = newRows.map(mapCardWithProgress);
-  return [...dueCards, ...newCards].slice(0, limit);
+  const queue = [...dueCards, ...newCards].slice(0, limit);
+  const queueIds = queue.map((card) => card.id);
+
+  await withClient((client) =>
+    client.query(
+      `UPDATE study_sessions
+       SET card_queue = $1, cursor = 0, current_card_id = NULL
+       WHERE user_id = $2 AND deck_id = $3 AND study_date = $4`,
+      [queueIds, String(userId), deckId, today],
+    ),
+  );
+
+  const updatedSession = { ...session, cardQueue: queueIds, todayNew: session.todayNew + newCardIds.length };
+  return { cards: queue, session: updatedSession };
+}
+
+export async function updateSessionPointer(userId, deckId, cursor, currentCardId = null) {
+  const today = new Date().toISOString().slice(0, 10);
+  await getDeckSession(userId, deckId, today);
+
+  await withClient((client) =>
+    client.query(
+      `UPDATE study_sessions
+       SET cursor = $1, current_card_id = $2
+       WHERE user_id = $3 AND deck_id = $4 AND study_date = $5`,
+      [cursor, currentCardId, String(userId), deckId, today],
+    ),
+  );
 }
 
 export async function recordScore(deckId, userId, deltaScore, cardId) {

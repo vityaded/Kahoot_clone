@@ -15,7 +15,7 @@ import {
   setLastDeck,
   setNewPerDay,
 } from './storage.js';
-import { endSession, flagBadCard, getActiveSession, startSession, submitAnswer } from './session.js';
+import { endSession, flagBadCard, getActiveSession, markCardActive, startSession, submitAnswer } from './session.js';
 
 async function downloadFile(bot, fileId, destination) {
   const url = await bot.getFileLink(fileId);
@@ -48,6 +48,9 @@ async function sendCard(bot, chatId, card) {
 }
 
 async function sendNext(bot, chatId, card) {
+  if (!card) return;
+  const marked = await markCardActive(chatId, card.id);
+  if (!marked) return;
   await sendCard(bot, chatId, card);
   await bot.sendMessage(chatId, 'Send your answer.');
 }
@@ -200,7 +203,17 @@ export async function startTelegramBot() {
     await setLastDeck(chatId, deck.id);
     const session = await startSession(deck, chatId, { limit: deck.newPerDay });
     if (!session) return bot.sendMessage(chatId, 'No cards available today.');
-    await sendNext(bot, chatId, session.cards[0]);
+
+    const currentCard =
+      (session.currentCardId && session.cards.find((card) => card.id === session.currentCardId)) ||
+      session.cards[session.cursor];
+
+    if (!currentCard) {
+      await endSession(chatId);
+      return bot.sendMessage(chatId, 'No cards available today.');
+    }
+
+    await sendNext(bot, chatId, currentCard);
   });
 
   bot.on('callback_query', async (query) => {
@@ -296,8 +309,16 @@ export async function startTelegramBot() {
     const session = getActiveSession(chatId);
     if (!session) return;
 
+    if (!session.isAwaitingAnswer || !session.currentCardId) {
+      await bot.sendMessage(chatId, 'Wait for the next card.');
+      return;
+    }
+
     const result = await submitAnswer(chatId, msg.text || '');
-    if (!result) return;
+    if (!result || result.wait) {
+      await bot.sendMessage(chatId, 'Wait for the next card.');
+      return;
+    }
 
     await bot.sendMessage(chatId, formatScoreMessage(result.evaluation, result.score), {
       reply_markup: {
@@ -306,13 +327,16 @@ export async function startTelegramBot() {
     });
 
     if (result.finished) {
-      endSession(chatId);
+      await endSession(chatId);
       await bot.sendMessage(chatId, `Session complete! Score: ${result.score}`);
       return;
     }
 
     setTimeout(() => {
-      sendNext(bot, chatId, result.nextCard);
+      const nextSession = getActiveSession(chatId);
+      if (nextSession) {
+        sendNext(bot, chatId, result.nextCard);
+      }
     }, 1000);
   });
 
