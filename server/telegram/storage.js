@@ -44,8 +44,15 @@ function mapDeckRow(row) {
 
 function mapCardRow(row) {
   if (!row) return null;
-  const media = row.media_type
-    ? { type: row.media_type, src: row.media_src, name: row.media_name }
+  const hasMedia = row.media_type || row.tg_file_id || row.media_src || row.media_name;
+  const media = hasMedia
+    ? {
+        type: row.media_type,
+        src: row.media_src,
+        name: row.media_name,
+        tgFileId: row.tg_file_id,
+        sha256: row.media_sha256,
+      }
     : null;
   return {
     id: row.id,
@@ -94,7 +101,7 @@ export async function loadState() {
   await runMigrations();
 }
 
-export async function createDeck({ title, cards = [], media = [], mediaDir }) {
+export async function createDeck({ title, cards = [], media = [], mediaDir, uploadMedia = null }) {
   const deckId = generateToken();
   const joinToken = generateToken();
   await withClient(async (client) => {
@@ -104,13 +111,27 @@ export async function createDeck({ title, cards = [], media = [], mediaDir }) {
       [deckId, title || 'Imported deck', joinToken, 20, false, mediaDir || null],
     );
 
-    const cardInserts = cards.map((card, index) => {
+    const uploadedByHash = new Map();
+
+    const cardInserts = cards.map(async (card, index) => {
       const id = nanoid();
       const mediaEntry = card.media || media.find((entry) => path.basename(entry.name) === card.media?.name);
+      let uploadResult = null;
+
+      if (mediaEntry && uploadMedia) {
+        const cacheKey = mediaEntry.sha256 || mediaEntry.src || mediaEntry.name;
+        if (uploadedByHash.has(cacheKey)) {
+          uploadResult = uploadedByHash.get(cacheKey);
+        } else {
+          uploadResult = await uploadMedia(mediaEntry);
+          uploadedByHash.set(cacheKey, uploadResult);
+        }
+      }
+
       return client.query(
         `INSERT INTO cards
-          (id, deck_id, note_guid, prompt, answer, subtitle, media_type, media_src, media_name, position)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+          (id, deck_id, note_guid, prompt, answer, subtitle, media_type, media_src, media_name, position, tg_file_id, media_sha256)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
          ON CONFLICT (deck_id, note_guid) DO NOTHING`,
         [
           id,
@@ -123,6 +144,8 @@ export async function createDeck({ title, cards = [], media = [], mediaDir }) {
           mediaEntry?.src || null,
           mediaEntry?.name || null,
           index,
+          uploadResult?.fileId || mediaEntry?.tgFileId || null,
+          uploadResult?.sha256 || mediaEntry?.sha256 || null,
         ],
       );
     });
@@ -294,6 +317,7 @@ async function getCardsByIds(cardIds = [], userId) {
   const { rows } = await withClient((client) =>
     client.query(
       `SELECT c.id, c.prompt, c.answer, c.subtitle, c.media_type, c.media_src, c.media_name,
+              c.tg_file_id, c.media_sha256,
               cp.state, cp.ease, cp.interval_days, cp.learning_step, cp.lapses, cp.due_at
        FROM cards c
        LEFT JOIN card_progress cp ON cp.card_id = c.id AND cp.user_id = $2
@@ -322,6 +346,7 @@ export async function claimCards(deckId, userId, limit) {
   const { rows: dueRows } = await withClient((client) =>
     client.query(
       `SELECT c.id, c.prompt, c.answer, c.subtitle, c.media_type, c.media_src, c.media_name,
+              c.tg_file_id, c.media_sha256,
               cp.state, cp.ease, cp.interval_days, cp.learning_step, cp.lapses, cp.due_at
        FROM card_progress cp
        JOIN cards c ON c.id = cp.card_id
@@ -345,6 +370,7 @@ export async function claimCards(deckId, userId, limit) {
   const { rows: newRows } = await withClient((client) =>
     client.query(
       `SELECT c.id, c.prompt, c.answer, c.subtitle, c.media_type, c.media_src, c.media_name,
+              c.tg_file_id, c.media_sha256,
               cp.state, cp.ease, cp.interval_days, cp.learning_step, cp.lapses, cp.due_at
        FROM cards c
        LEFT JOIN card_progress cp ON cp.card_id = c.id AND cp.user_id = $2

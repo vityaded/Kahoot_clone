@@ -17,10 +17,16 @@ CREATE TABLE IF NOT EXISTS cards (
   subtitle TEXT,
   media_type TEXT,
   media_src TEXT,
+  tg_file_id TEXT,
+  media_sha256 TEXT,
   media_name TEXT,
   position INTEGER NOT NULL,
   UNIQUE (deck_id, note_guid)
 );
+
+ALTER TABLE cards
+  ADD COLUMN IF NOT EXISTS tg_file_id TEXT,
+  ADD COLUMN IF NOT EXISTS media_sha256 TEXT;
 
 CREATE TABLE IF NOT EXISTS enrollments (
   user_id TEXT NOT NULL,

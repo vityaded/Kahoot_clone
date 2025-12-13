@@ -26,6 +26,26 @@ async function downloadFile(bot, fileId, destination) {
   return destination;
 }
 
+async function uploadMediaFile(bot, chatId, media) {
+  const options = { disable_notification: true };
+  if (media.type === 'photo') {
+    const message = await bot.sendPhoto(chatId, media.src, options);
+    const photos = message.photo || [];
+    return photos[photos.length - 1]?.file_id || null;
+  }
+  if (media.type === 'audio') {
+    const message = await bot.sendAudio(chatId, media.src, options);
+    return message.audio?.file_id || null;
+  }
+  if (media.type === 'video') {
+    const message = await bot.sendVideo(chatId, media.src, options);
+    return message.video?.file_id || null;
+  }
+
+  const message = await bot.sendDocument(chatId, media.src, options);
+  return message.document?.file_id || null;
+}
+
 function buildDeepLink(botUsername, token) {
   return `https://t.me/${botUsername}?start=deck_${token}`;
 }
@@ -37,12 +57,13 @@ function formatCard(card) {
 async function sendCard(bot, chatId, card, replyMarkup = null) {
   const text = formatCard(card);
   const options = replyMarkup ? { reply_markup: replyMarkup } : {};
-  if (card.media?.type === 'photo') {
-    await bot.sendPhoto(chatId, card.media.src, { caption: text, ...options });
-  } else if (card.media?.type === 'audio') {
-    await bot.sendAudio(chatId, card.media.src, { caption: text, ...options });
-  } else if (card.media?.type === 'video') {
-    await bot.sendVideo(chatId, card.media.src, { caption: text, ...options });
+  const mediaPayload = card.media?.tgFileId || card.media?.src;
+  if (card.media?.type === 'photo' && mediaPayload) {
+    await bot.sendPhoto(chatId, mediaPayload, { caption: text, ...options });
+  } else if (card.media?.type === 'audio' && mediaPayload) {
+    await bot.sendAudio(chatId, mediaPayload, { caption: text, ...options });
+  } else if (card.media?.type === 'video' && mediaPayload) {
+    await bot.sendVideo(chatId, mediaPayload, { caption: text, ...options });
   } else {
     await bot.sendMessage(chatId, text || 'Ready?', options);
   }
@@ -138,11 +159,22 @@ export async function startTelegramBot() {
     await downloadFile(bot, file.file_id, tempPath);
     const outputDir = tempPath.replace(/\.apkg$/, '');
     const { cards, mediaFiles } = await extractApkg(tempPath, outputDir);
+    const uploadCache = new Map();
+
     const deck = await createDeck({
       title: file.file_name.replace(/\.apkg$/, ''),
       cards,
       media: mediaFiles,
       mediaDir: outputDir,
+      uploadMedia: async (mediaEntry) => {
+        const cacheKey = mediaEntry.sha256 || mediaEntry.src || mediaEntry.name;
+        if (uploadCache.has(cacheKey)) return uploadCache.get(cacheKey);
+
+        const fileId = await uploadMediaFile(bot, chatId, mediaEntry);
+        const payload = { fileId, sha256: mediaEntry.sha256 };
+        uploadCache.set(cacheKey, payload);
+        return payload;
+      },
     });
 
     adminContext.set(chatId, deck.id);
