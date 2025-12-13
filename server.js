@@ -830,9 +830,10 @@ app.post('/api/homework/:homeworkId/submit', async (req, res) => {
   res.json({ submission, leaderboard, review });
 });
 
-startTelegramBot()?.catch?.((error) => {
+startTelegramBot().catch((error) => {
   /* eslint-disable no-console */
   console.error('Failed to start Telegram bot', error);
+  process.exit(1);
 });
 
 server.listen(PORT, HOST, () => {

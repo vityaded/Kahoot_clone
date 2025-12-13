@@ -69,8 +69,10 @@ async function ensureDeckFromContext(chatId, deckId, adminContext) {
 }
 
 export async function startTelegramBot() {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) return null;
+  const token = process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) {
+    throw new Error('BOT_TOKEN (or TELEGRAM_BOT_TOKEN) is required to start the Telegram bot.');
+  }
   await loadState();
   const bot = new TelegramBot(token, { polling: true });
   const botInfo = await bot.getMe();
