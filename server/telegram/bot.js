@@ -77,6 +77,32 @@ export async function startTelegramBot() {
   const bot = new TelegramBot(token, { polling: true });
   const botInfo = await bot.getMe();
   const adminContext = new Map();
+  const awaitingNewPerDay = new Map();
+
+  const buildManageKeyboard = (deck) => ({
+    inline_keyboard: [
+      [
+        { text: 'Stats', callback_data: `manage:stats:${deck.id}` },
+        { text: 'Export bad cards', callback_data: `manage:export_bad:${deck.id}` },
+      ],
+      [
+        { text: 'Set N/day', callback_data: `manage:set_new:${deck.id}` },
+        { text: 'Rotate link', callback_data: `manage:rotate:${deck.id}` },
+        { text: 'Disable deck', callback_data: `manage:disable:${deck.id}` },
+      ],
+    ],
+  });
+
+  const promptForNewPerDay = async (chatId, deck, cardsCount) => {
+    const header = cardsCount
+      ? `Deck imported (${cardsCount} cards).`
+      : `Deck "${deck.title}" selected.`;
+    awaitingNewPerDay.set(chatId, deck.id);
+    await bot.sendMessage(
+      chatId,
+      `${header}\nHow many new cards per day should be released? Send a whole number (e.g., 20).`,
+    );
+  };
 
   const getDeckFromMessage = async (msg, providedToken = null) => {
     const fromToken = providedToken?.startsWith('deck_') ? providedToken.replace('deck_', '') : providedToken;
@@ -115,12 +141,12 @@ export async function startTelegramBot() {
     });
 
     adminContext.set(chatId, deck.id);
-    const link = buildDeepLink(botInfo.username, deck.joinToken);
-    bot.sendMessage(chatId, `Deck imported (${cards.length} cards). Students can join: ${link}`);
+    await promptForNewPerDay(chatId, deck, cards.length);
   });
 
   bot.onText(/\/rotate_link(?:\s+(.+))?/, async (msg, match) => {
     const chatId = msg.chat.id;
+    if (awaitingNewPerDay.has(chatId)) return bot.sendMessage(chatId, 'Set new cards per day first.');
     const requested = match?.[1];
     const deck = await ensureDeckFromContext(chatId, (await getDeckFromMessage(msg, requested))?.id, adminContext);
     if (!deck) return bot.sendMessage(chatId, 'No deck selected. Upload an .apkg first.');
@@ -180,6 +206,56 @@ export async function startTelegramBot() {
   bot.on('callback_query', async (query) => {
     const { message, data, from } = query;
     if (!message || !data) return;
+    if (data.startsWith('manage:')) {
+      const [, action, deckId] = data.split(':');
+      const deck = deckId ? await getDeck(deckId) : null;
+      if (!deck) {
+        await bot.answerCallbackQuery(query.id, { text: 'Deck not found.' });
+        return;
+      }
+      adminContext.set(from.id, deck.id);
+
+      if (action === 'stats') {
+        const payload = await exportStats(deck.id);
+        await bot.sendMessage(message.chat.id, 'Stats:\n' + JSON.stringify(payload, null, 2), {
+          reply_markup: buildManageKeyboard(deck),
+        });
+        await bot.answerCallbackQuery(query.id, { text: 'Stats sent.' });
+        return;
+      }
+
+      if (action === 'export_bad') {
+        const payload = await exportStats(deck.id);
+        await bot.sendMessage(
+          message.chat.id,
+          `Flagged cards: ${payload?.badCards?.join(', ') || 'none'}`,
+          { reply_markup: buildManageKeyboard(deck) },
+        );
+        await bot.answerCallbackQuery(query.id, { text: 'Bad cards exported.' });
+        return;
+      }
+
+      if (action === 'set_new') {
+        await bot.answerCallbackQuery(query.id, { text: 'Send a number of new cards per day.' });
+        await promptForNewPerDay(message.chat.id, deck);
+        return;
+      }
+
+      if (action === 'rotate') {
+        const newToken = await rotateDeckToken(deck.id);
+        const link = buildDeepLink(botInfo.username, newToken);
+        await bot.sendMessage(message.chat.id, `New join link: ${link}`, { reply_markup: buildManageKeyboard(deck) });
+        await bot.answerCallbackQuery(query.id, { text: 'Link rotated.' });
+        return;
+      }
+
+      if (action === 'disable') {
+        await disableDeck(deck.id);
+        await bot.sendMessage(message.chat.id, 'Deck disabled.');
+        await bot.answerCallbackQuery(query.id, { text: 'Deck disabled.' });
+        return;
+      }
+    }
     if (data === 'flag_bad') {
       const session = getActiveSession(from.id);
       if (session) {
@@ -196,6 +272,27 @@ export async function startTelegramBot() {
   bot.on('message', async (msg) => {
     if (msg.text?.startsWith('/')) return;
     const chatId = msg.chat.id;
+
+    if (awaitingNewPerDay.has(chatId)) {
+      const deckId = awaitingNewPerDay.get(chatId);
+      const amount = Number(msg.text);
+      if (!Number.isInteger(amount) || amount <= 0) {
+        await bot.sendMessage(chatId, 'Please send a positive whole number for new cards per day.');
+        return;
+      }
+
+      const updated = await setNewPerDay(deckId, amount);
+      awaitingNewPerDay.delete(chatId);
+      const deck = await getDeck(deckId);
+      const link = buildDeepLink(botInfo.username, deck.joinToken);
+      await bot.sendMessage(
+        chatId,
+        `Daily new card limit set to ${updated}. Students can join: ${link}`,
+        { reply_markup: buildManageKeyboard(deck) },
+      );
+      return;
+    }
+
     const session = getActiveSession(chatId);
     if (!session) return;
 
