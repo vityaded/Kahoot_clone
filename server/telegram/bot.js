@@ -53,9 +53,13 @@ async function sendNext(bot, chatId, card) {
 }
 
 function formatScoreMessage(evaluation, score) {
-  if (evaluation.isCorrect) return `✅ Correct! (+${evaluation.earned}) Total: ${score}`;
-  if (evaluation.isPartial) return `🟡 Almost! (+${evaluation.earned}) Correct: ${evaluation.correctAnswer}`;
-  return `❌ Incorrect. Correct: ${evaluation.correctAnswer}`;
+  const header = evaluation.isCorrect
+    ? `✅ Correct! (+${evaluation.earned})`
+    : evaluation.isPartial
+      ? `🟡 Almost! (+${evaluation.earned})`
+      : '❌ Incorrect.';
+  const comparison = `Your answer: ${evaluation.playerAnswer || '—'}\nExpected: ${evaluation.correctAnswer}`;
+  return `${header} Total: ${score}\n${comparison}`;
 }
 
 async function ensureDeckFromContext(chatId, deckId, adminContext) {
@@ -177,9 +181,12 @@ export async function startTelegramBot() {
     if (data === 'flag_bad') {
       const session = getActiveSession(from.id);
       if (session) {
-        const current = session.cards[session.cursor];
-        await flagBadCard(from.id, current.id);
-        await bot.answerCallbackQuery(query.id, { text: 'Card flagged.' });
+        const flaggedIndex = Math.max(0, Math.min(session.cursor - 1, session.cards.length - 1));
+        const flagged = session.cards[flaggedIndex];
+        if (flagged) {
+          await flagBadCard(from.id, flagged.id);
+        }
+        await bot.answerCallbackQuery(query.id, { text: 'Card flagged and suspended.' });
       }
     }
   });
@@ -195,7 +202,7 @@ export async function startTelegramBot() {
 
     await bot.sendMessage(chatId, formatScoreMessage(result.evaluation, result.score), {
       reply_markup: {
-        inline_keyboard: [[{ text: 'Flag card', callback_data: 'flag_bad' }]],
+        inline_keyboard: [[{ text: 'Bad card', callback_data: 'flag_bad' }]],
       },
     });
 

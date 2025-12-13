@@ -1,5 +1,5 @@
 import { evaluateAnswer } from '../evaluation.js';
-import { claimCards, recordBadCard, recordScore } from './storage.js';
+import { claimCards, recordScore, suspendCardForUser, updateCardProgress } from './storage.js';
 
 const activeSessions = new Map();
 
@@ -31,7 +31,7 @@ export async function startSession(deck, userId, { limit = 10 } = {}) {
 export async function flagBadCard(userId, cardId) {
   const session = getActiveSession(userId);
   if (!session) return null;
-  return recordBadCard(session.deckId, cardId, userId);
+  return suspendCardForUser(session.deckId, cardId, userId);
 }
 
 export async function submitAnswer(userId, answer) {
@@ -46,6 +46,7 @@ export async function submitAnswer(userId, answer) {
     { includeSpeedBonus: false },
   );
 
+  await updateCardProgress(session.deckId, userId, current.id, evaluation);
   session.score += evaluation.earned;
   await recordScore(session.deckId, userId, evaluation.earned, current.id);
   session.cursor += 1;
