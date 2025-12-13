@@ -34,16 +34,17 @@ function formatCard(card) {
   return [card.prompt, card.subtitle].filter(Boolean).join('\n');
 }
 
-async function sendCard(bot, chatId, card) {
+async function sendCard(bot, chatId, card, replyMarkup = null) {
   const text = formatCard(card);
+  const options = replyMarkup ? { reply_markup: replyMarkup } : {};
   if (card.media?.type === 'photo') {
-    await bot.sendPhoto(chatId, card.media.src, { caption: text });
+    await bot.sendPhoto(chatId, card.media.src, { caption: text, ...options });
   } else if (card.media?.type === 'audio') {
-    await bot.sendAudio(chatId, card.media.src, { caption: text });
+    await bot.sendAudio(chatId, card.media.src, { caption: text, ...options });
   } else if (card.media?.type === 'video') {
-    await bot.sendVideo(chatId, card.media.src, { caption: text });
+    await bot.sendVideo(chatId, card.media.src, { caption: text, ...options });
   } else {
-    await bot.sendMessage(chatId, text || 'Ready?');
+    await bot.sendMessage(chatId, text || 'Ready?', options);
   }
 }
 
@@ -51,7 +52,8 @@ async function sendNext(bot, chatId, card) {
   if (!card) return;
   const marked = await markCardActive(chatId, card.id);
   if (!marked) return;
-  await sendCard(bot, chatId, card);
+  const replyMarkup = { inline_keyboard: [[{ text: 'Bad card', callback_data: 'flag_bad' }]] };
+  await sendCard(bot, chatId, card, replyMarkup);
   await bot.sendMessage(chatId, 'Send your answer.');
 }
 
@@ -272,8 +274,9 @@ export async function startTelegramBot() {
     if (data === 'flag_bad') {
       const session = getActiveSession(from.id);
       if (session) {
-        const flaggedIndex = Math.max(0, Math.min(session.cursor - 1, session.cards.length - 1));
-        const flagged = session.cards[flaggedIndex];
+        const activeCardId =
+          session.currentCardId || session.cards[Math.max(0, Math.min(session.cursor - 1, session.cards.length - 1))]?.id;
+        const flagged = activeCardId && session.cards.find((card) => card.id === activeCardId);
         if (flagged) {
           await flagBadCard(from.id, flagged.id);
         }
