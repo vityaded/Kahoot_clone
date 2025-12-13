@@ -1,5 +1,22 @@
 const synonymCache = new Map();
 
+const DEFAULT_SIMILARITY_OK = 0.8;
+const DEFAULT_SIMILARITY_ALMOST = 0.65;
+
+function parseSimilarity(value, fallback) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  if (parsed <= 0) return fallback;
+  if (parsed >= 1) return Math.min(parsed, 0.99);
+  return parsed;
+}
+
+const ENV_SIMILARITY_OK = parseSimilarity(process.env.SIMILARITY_OK, DEFAULT_SIMILARITY_OK);
+const ENV_SIMILARITY_ALMOST = parseSimilarity(process.env.SIMILARITY_ALMOST, DEFAULT_SIMILARITY_ALMOST);
+
+const SIMILARITY_OK = ENV_SIMILARITY_OK;
+const SIMILARITY_ALMOST = Math.min(ENV_SIMILARITY_ALMOST, SIMILARITY_OK);
+
 export function normalise(text = '') {
   return String(text ?? '').trim().toLowerCase();
 }
@@ -97,7 +114,8 @@ export async function evaluateAnswer(question, submission, options = {}) {
     durationMs = null,
     timeRemainingMs = null,
     includeSpeedBonus = true,
-    similarityThreshold = 0.8,
+    similarityOk = SIMILARITY_OK,
+    similarityAlmost = SIMILARITY_ALMOST,
   } = options;
 
   const expectedAnswers = [question.answer, ...(question.alternateAnswers || [])];
@@ -106,13 +124,18 @@ export async function evaluateAnswer(question, submission, options = {}) {
   const normalizedPartial = (question.partialAnswers || []).map(normalise);
   const normalizedSynonyms = await collectSynonyms(expectedAnswers);
 
-  const isCorrect = normalizedExpected.some((expected) => normalizedSubmitted === expected);
+  const matchesExpected = normalizedExpected.some((expected) =>
+    isCloseMatch(normalizedSubmitted, expected, similarityOk),
+  );
+
+  const isCorrect =
+    normalizedExpected.some((expected) => normalizedSubmitted === expected) || matchesExpected;
   const isPartial =
     !isCorrect &&
     (normalizedPartial.includes(normalizedSubmitted) ||
       normalizedSynonyms.includes(normalizedSubmitted) ||
-      normalizedSynonyms.some((syn) => isCloseMatch(normalizedSubmitted, syn, similarityThreshold)) ||
-      normalizedExpected.some((expected) => isCloseMatch(normalizedSubmitted, expected, similarityThreshold)));
+      normalizedSynonyms.some((syn) => isCloseMatch(normalizedSubmitted, syn, similarityAlmost)) ||
+      normalizedExpected.some((expected) => isCloseMatch(normalizedSubmitted, expected, similarityAlmost)));
 
   const speedBonus = calculateSpeedBonus(durationMs, timeRemainingMs, includeSpeedBonus);
   const baseScore = 1000 + speedBonus;

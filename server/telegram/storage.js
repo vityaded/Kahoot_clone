@@ -2,8 +2,26 @@ import { customAlphabet, nanoid } from 'nanoid';
 import path from 'path';
 import { runMigrations, withClient } from './db.js';
 
-export const LEARNING_STEPS_MINUTES = [1, 10];
-export const LEARNING_GRADUATE_DAYS = 3;
+const DEFAULT_LEARNING_STEPS_MINUTES = [1, 10];
+const DEFAULT_LEARNING_GRADUATE_DAYS = 3;
+
+function parseLearningSteps(value) {
+  if (!value) return DEFAULT_LEARNING_STEPS_MINUTES;
+  const parsed = String(value)
+    .split(',')
+    .map((entry) => Number(entry.trim()))
+    .filter((entry) => Number.isFinite(entry) && entry >= 1);
+  return parsed.length ? parsed : DEFAULT_LEARNING_STEPS_MINUTES;
+}
+
+function parseGraduateDays(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 1) return DEFAULT_LEARNING_GRADUATE_DAYS;
+  return parsed;
+}
+
+export const LEARNING_STEPS_MINUTES = parseLearningSteps(process.env.LEARNING_STEPS_MINUTES);
+export const LEARNING_GRADUATE_DAYS = parseGraduateDays(process.env.LEARNING_GRADUATE_DAYS);
 const DEFAULT_EASE = 2.5;
 const MIN_EASE = 1.3;
 const EASE_BONUS = 0.05;
