@@ -58,7 +58,7 @@ function formatScoreMessage(evaluation, score) {
   return `❌ Incorrect. Correct: ${evaluation.correctAnswer}`;
 }
 
-function ensureDeckFromContext(chatId, deckId, adminContext) {
+async function ensureDeckFromContext(chatId, deckId, adminContext) {
   const contextDeck = adminContext.get(chatId);
   const resolved = deckId || contextDeck;
   return resolved ? getDeck(resolved) : null;
@@ -72,20 +72,20 @@ export async function startTelegramBot() {
   const botInfo = await bot.getMe();
   const adminContext = new Map();
 
-  const getDeckFromMessage = (msg, providedToken = null) => {
+  const getDeckFromMessage = async (msg, providedToken = null) => {
     const fromToken = providedToken?.startsWith('deck_') ? providedToken.replace('deck_', '') : providedToken;
-    if (fromToken) return getDeckByToken(fromToken) || getDeck(fromToken);
+    if (fromToken) return (await getDeckByToken(fromToken)) || (await getDeck(fromToken));
     return null;
   };
 
-  bot.onText(/\/start(?:\s+(.+))?/, (msg, match) => {
+  bot.onText(/\/start(?:\s+(.+))?/, async (msg, match) => {
     const chatId = msg.chat.id;
     const payload = match?.[1];
     const tokenPayload = payload?.startsWith('deck_') ? payload.replace('deck_', '') : null;
-    const deck = tokenPayload ? getDeckByToken(tokenPayload) : null;
+    const deck = tokenPayload ? await getDeckByToken(tokenPayload) : null;
     if (deck) {
-      joinDeck(chatId, deck.id);
-      setLastDeck(chatId, deck.id);
+      await joinDeck(chatId, deck.id);
+      await setLastDeck(chatId, deck.id);
       bot.sendMessage(chatId, `Joined deck "${deck.title}". Use /today to start your session.`);
     } else {
       bot.sendMessage(chatId, 'Welcome! Send an .apkg file to import or use your deep link to join a deck.');
@@ -101,7 +101,7 @@ export async function startTelegramBot() {
     await downloadFile(bot, file.file_id, tempPath);
     const outputDir = tempPath.replace(/\.apkg$/, '');
     const { cards, mediaFiles } = await extractApkg(tempPath, outputDir);
-    const deck = createDeck({
+    const deck = await createDeck({
       title: file.file_name.replace(/\.apkg$/, ''),
       cards,
       media: mediaFiles,
@@ -113,59 +113,60 @@ export async function startTelegramBot() {
     bot.sendMessage(chatId, `Deck imported (${cards.length} cards). Students can join: ${link}`);
   });
 
-  bot.onText(/\/rotate_link(?:\s+(.+))?/, (msg, match) => {
+  bot.onText(/\/rotate_link(?:\s+(.+))?/, async (msg, match) => {
     const chatId = msg.chat.id;
     const requested = match?.[1];
-    const deck = ensureDeckFromContext(chatId, getDeckFromMessage(msg, requested)?.id, adminContext);
+    const deck = await ensureDeckFromContext(chatId, (await getDeckFromMessage(msg, requested))?.id, adminContext);
     if (!deck) return bot.sendMessage(chatId, 'No deck selected. Upload an .apkg first.');
-    const newToken = rotateDeckToken(deck.id);
+    const newToken = await rotateDeckToken(deck.id);
     const link = buildDeepLink(botInfo.username, newToken);
     bot.sendMessage(chatId, `New join link: ${link}`);
   });
 
-  bot.onText(/\/set_new_per_day\s+(\d+)(?:\s+(.+))?/, (msg, match) => {
+  bot.onText(/\/set_new_per_day\s+(\d+)(?:\s+(.+))?/, async (msg, match) => {
     const chatId = msg.chat.id;
     const amount = match?.[1];
     const requested = match?.[2];
-    const deck = ensureDeckFromContext(chatId, getDeckFromMessage(msg, requested)?.id, adminContext);
+    const deck = await ensureDeckFromContext(chatId, (await getDeckFromMessage(msg, requested))?.id, adminContext);
     if (!deck) return bot.sendMessage(chatId, 'No deck selected.');
-    const updated = setNewPerDay(deck.id, Number(amount));
+    const updated = await setNewPerDay(deck.id, Number(amount));
     bot.sendMessage(chatId, `Daily new card limit set to ${updated}.`);
   });
 
-  bot.onText(/\/disable_deck(?:\s+(.+))?/, (msg, match) => {
+  bot.onText(/\/disable_deck(?:\s+(.+))?/, async (msg, match) => {
     const chatId = msg.chat.id;
     const requested = match?.[1];
-    const deck = ensureDeckFromContext(chatId, getDeckFromMessage(msg, requested)?.id, adminContext);
+    const deck = await ensureDeckFromContext(chatId, (await getDeckFromMessage(msg, requested))?.id, adminContext);
     if (!deck) return bot.sendMessage(chatId, 'No deck selected.');
-    disableDeck(deck.id);
+    await disableDeck(deck.id);
     bot.sendMessage(chatId, 'Deck disabled.');
   });
 
-  bot.onText(/\/export_stats(?:\s+(.+))?/, (msg, match) => {
+  bot.onText(/\/export_stats(?:\s+(.+))?/, async (msg, match) => {
     const chatId = msg.chat.id;
     const requested = match?.[1];
-    const deck = ensureDeckFromContext(chatId, getDeckFromMessage(msg, requested)?.id, adminContext);
+    const deck = await ensureDeckFromContext(chatId, (await getDeckFromMessage(msg, requested))?.id, adminContext);
     if (!deck) return bot.sendMessage(chatId, 'No deck selected.');
-    const payload = exportStats(deck.id);
+    const payload = await exportStats(deck.id);
     bot.sendMessage(chatId, 'Stats:\n' + JSON.stringify(payload, null, 2));
   });
 
-  bot.onText(/\/export_bad(?:\s+(.+))?/, (msg, match) => {
+  bot.onText(/\/export_bad(?:\s+(.+))?/, async (msg, match) => {
     const chatId = msg.chat.id;
     const requested = match?.[1];
-    const deck = ensureDeckFromContext(chatId, getDeckFromMessage(msg, requested)?.id, adminContext);
+    const deck = await ensureDeckFromContext(chatId, (await getDeckFromMessage(msg, requested))?.id, adminContext);
     if (!deck) return bot.sendMessage(chatId, 'No deck selected.');
-    bot.sendMessage(chatId, `Flagged cards: ${deck.badCards.join(', ') || 'none'}`);
+    const payload = await exportStats(deck.id);
+    bot.sendMessage(chatId, `Flagged cards: ${payload?.badCards?.join(', ') || 'none'}`);
   });
 
   bot.onText(/\/today(?:\s+(.+))?/, async (msg, match) => {
     const chatId = msg.chat.id;
     const tokenOrId = match?.[1];
-    const deck = resolveDeckForUser(chatId, tokenOrId);
+    const deck = await resolveDeckForUser(chatId, tokenOrId);
     if (!deck) return bot.sendMessage(chatId, 'Join a deck first using the deep link.');
-    setLastDeck(chatId, deck.id);
-    const session = startSession(deck, chatId, { limit: deck.newPerDay });
+    await setLastDeck(chatId, deck.id);
+    const session = await startSession(deck, chatId, { limit: deck.newPerDay });
     if (!session) return bot.sendMessage(chatId, 'No cards available today.');
     await sendNext(bot, chatId, session.cards[0]);
   });
@@ -177,7 +178,7 @@ export async function startTelegramBot() {
       const session = getActiveSession(from.id);
       if (session) {
         const current = session.cards[session.cursor];
-        flagBadCard(from.id, current.id);
+        await flagBadCard(from.id, current.id);
         await bot.answerCallbackQuery(query.id, { text: 'Card flagged.' });
       }
     }

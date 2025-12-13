@@ -11,8 +11,8 @@ function stopSession(userId) {
   activeSessions.delete(userId);
 }
 
-export function startSession(deck, userId, { limit = 10 } = {}) {
-  const cards = claimCards(deck.id, userId, limit);
+export async function startSession(deck, userId, { limit = 10 } = {}) {
+  const cards = await claimCards(deck.id, userId, limit);
   if (!cards.length) return null;
 
   const session = {
@@ -28,10 +28,10 @@ export function startSession(deck, userId, { limit = 10 } = {}) {
   return session;
 }
 
-export function flagBadCard(userId, cardId) {
+export async function flagBadCard(userId, cardId) {
   const session = getActiveSession(userId);
   if (!session) return null;
-  return recordBadCard(session.deckId, cardId);
+  return recordBadCard(session.deckId, cardId, userId);
 }
 
 export async function submitAnswer(userId, answer) {
@@ -47,7 +47,7 @@ export async function submitAnswer(userId, answer) {
   );
 
   session.score += evaluation.earned;
-  recordScore(session.deckId, userId, evaluation.earned);
+  await recordScore(session.deckId, userId, evaluation.earned, current.id);
   session.cursor += 1;
   const hasNext = session.cursor < session.cards.length;
 
