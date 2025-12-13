@@ -40,11 +40,17 @@ CREATE TABLE IF NOT EXISTS study_sessions (
   deck_id TEXT NOT NULL REFERENCES decks(id) ON DELETE CASCADE,
   study_date DATE NOT NULL,
   today_new INTEGER NOT NULL DEFAULT 0,
+  card_queue JSONB NOT NULL DEFAULT '[]'::jsonb,
   cursor INTEGER NOT NULL DEFAULT 0,
+  current_card_id TEXT,
   attempts INTEGER NOT NULL DEFAULT 0,
   score INTEGER NOT NULL DEFAULT 0,
   UNIQUE (user_id, deck_id, study_date)
 );
+
+ALTER TABLE study_sessions
+  ADD COLUMN IF NOT EXISTS card_queue JSONB NOT NULL DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS current_card_id TEXT;
 
 CREATE TABLE IF NOT EXISTS reviews (
   user_id TEXT NOT NULL,
