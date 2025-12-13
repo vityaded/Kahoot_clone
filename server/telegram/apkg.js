@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import AdmZip from 'adm-zip';
+import crypto from 'crypto';
 import initSqlJs from 'sql.js';
 
 const FIELD_SEPARATOR = '\u001f';
@@ -57,23 +58,31 @@ async function readMediaIndex(mediaPath) {
   }
 }
 
+async function hashFile(filePath) {
+  const buffer = await fs.readFile(filePath);
+  return crypto.createHash('sha256').update(buffer).digest('hex');
+}
+
 export async function extractApkg(apkgPath, outputDir) {
   const zip = new AdmZip(apkgPath);
   await fs.mkdir(outputDir, { recursive: true });
   zip.extractAllTo(outputDir, true);
 
   const mediaIndex = await readMediaIndex(path.join(outputDir, 'media'));
-  const mediaFiles = mediaIndex.map(({ name }) => ({
-    type: name.match(/\.(mp4|mov|mkv|avi|webm)$/i)
-      ? 'video'
-      : name.match(/\.(mp3|wav|m4a|aac|ogg)$/i)
-      ? 'audio'
-      : name.match(/\.(png|jpe?g|gif|webp|svg)$/i)
-      ? 'photo'
-      : 'document',
-    name,
-    src: path.join(outputDir, name),
-  }));
+  const mediaFiles = await Promise.all(
+    mediaIndex.map(async ({ name }) => ({
+      type: name.match(/\.(mp4|mov|mkv|avi|webm)$/i)
+        ? 'video'
+        : name.match(/\.(mp3|wav|m4a|aac|ogg)$/i)
+        ? 'audio'
+        : name.match(/\.(png|jpe?g|gif|webp|svg)$/i)
+        ? 'photo'
+        : 'document',
+      name,
+      src: path.join(outputDir, name),
+      sha256: await hashFile(path.join(outputDir, name)),
+    })),
+  );
 
   const collectionPath = ['collection.anki21', 'collection.anki2']
     .map((name) => path.join(outputDir, name))
