@@ -9,6 +9,7 @@ import {
   normalise,
   scoreSubmission,
 } from './server/evaluation.js';
+import { startTelegramBot } from './server/telegram/bot.js';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const DATA_FILE = path.join(DATA_DIR, 'quizzes.json');
@@ -827,6 +828,11 @@ app.post('/api/homework/:homeworkId/submit', async (req, res) => {
       correctAnswer: entry.correctAnswer,
     }));
   res.json({ submission, leaderboard, review });
+});
+
+startTelegramBot()?.catch?.((error) => {
+  /* eslint-disable no-console */
+  console.error('Failed to start Telegram bot', error);
 });
 
 server.listen(PORT, HOST, () => {
