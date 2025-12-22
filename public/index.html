@@ -37,10 +37,15 @@
           <h2>Your quizzes (newest first)</h2>
           <p class="muted">Created quizzes stay here in chronological order so you can relaunch them quickly.</p>
         </div>
-        <button type="button" id="refresh-library" class="ghost">Refresh</button>
+        <div class="cta-row">
+          <button type="button" id="import-apkg" class="button ghost">Import .apkg</button>
+          <button type="button" id="refresh-library" class="ghost">Refresh</button>
+        </div>
       </div>
+      <p id="import-status" class="muted" style="display:none;"></p>
       <ul id="quiz-list" class="quiz-list"></ul>
       <p id="empty-state" class="muted">No quizzes yet. Create one to see it appear here.</p>
+      <input type="file" id="apkg-input" accept=".apkg" style="display:none;" />
     </section>
   </main>
 
@@ -48,6 +53,10 @@
     const quizList = document.getElementById('quiz-list');
     const emptyState = document.getElementById('empty-state');
     const refreshBtn = document.getElementById('refresh-library');
+    const importBtn = document.getElementById('import-apkg');
+    const apkgInput = document.getElementById('apkg-input');
+    const importStatus = document.getElementById('import-status');
+    let isImporting = false;
 
     function formatDate(timestamp) {
       const date = new Date(timestamp);
@@ -97,6 +106,54 @@
         emptyState.style.display = 'block';
       }
     }
+
+    function setImportStatus(message, isError = false) {
+      importStatus.textContent = message;
+      importStatus.style.color = isError ? '#e24a68' : 'var(--muted)';
+      importStatus.style.display = message ? 'block' : 'none';
+    }
+
+    importBtn.addEventListener('click', () => {
+      if (isImporting) return;
+      apkgInput.click();
+    });
+
+    apkgInput.addEventListener('change', async (event) => {
+      const file = event.target.files?.[0];
+      event.target.value = '';
+      if (!file) return;
+      isImporting = true;
+      setImportStatus(`Importing ${file.name}...`);
+      importBtn.disabled = true;
+      refreshBtn.disabled = true;
+      try {
+        const formData = new FormData();
+        formData.append('apkg', file);
+        const response = await fetch('/api/quizzes/import/apkg', {
+          method: 'POST',
+          body: formData,
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          setImportStatus(payload?.error || 'Import failed.', true);
+          return;
+        }
+        const createdCount = payload.created?.length || 0;
+        const templateIds = (payload.created || []).map((item) => item.id).join(', ');
+        setImportStatus(
+          createdCount
+            ? `Imported ${createdCount} template${createdCount === 1 ? '' : 's'}${templateIds ? ` (${templateIds})` : ''}.`
+            : 'No quizzes were created.',
+        );
+        await loadQuizzes();
+      } catch (error) {
+        setImportStatus('Unable to import right now.', true);
+      } finally {
+        isImporting = false;
+        importBtn.disabled = false;
+        refreshBtn.disabled = false;
+      }
+    });
 
     refreshBtn.addEventListener('click', loadQuizzes);
     loadQuizzes();

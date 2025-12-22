@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "test:import": "node scripts/test_import_apkg.js"
   },
   "keywords": [
     "quiz",
@@ -17,7 +18,11 @@
   "license": "ISC",
   "dependencies": {
     "express": "^5.2.1",
+    "jszip": "^3.10.1",
+    "mime-types": "^2.1.35",
+    "multer": "^1.4.5-lts.1",
     "nanoid": "^5.1.6",
-    "socket.io": "^4.8.1"
+    "socket.io": "^4.8.1",
+    "sql.js": "^1.12.0"
   }
 }

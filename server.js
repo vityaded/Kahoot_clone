@@ -3,16 +3,14 @@ import http from 'http';
 import { Server } from 'socket.io';
 import { customAlphabet, nanoid } from 'nanoid';
 import { promises as fs } from 'fs';
-import path from 'path';
+import multer from 'multer';
 import {
   evaluateAnswer,
   normalise,
   scoreSubmission,
 } from './server/evaluation.js';
-
-const DATA_DIR = path.join(process.cwd(), 'data');
-const DATA_FILE = path.join(DATA_DIR, 'quizzes.json');
-const HOMEWORK_FILE = path.join(DATA_DIR, 'homework.json');
+import { DATA_FILE, HOMEWORK_FILE, MEDIA_DIR, ensureDataDir, ensureMediaDir } from './server/storage.js';
+import importApkg from './server/importApkg.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -38,11 +36,12 @@ function serializeForStorage() {
     questions: quiz.questions,
     questionDuration: quiz.questionDuration,
     createdAt: quiz.createdAt,
+    source: quiz.source || null,
   }));
 }
 
 async function persistQuizzes() {
-  await fs.mkdir(DATA_DIR, { recursive: true });
+  await ensureDataDir();
   const payload = JSON.stringify(serializeForStorage());
   await fs.writeFile(DATA_FILE, payload, 'utf8');
 }
@@ -52,7 +51,13 @@ async function loadPersistedQuizzes() {
     const file = await fs.readFile(DATA_FILE, 'utf8');
     const stored = JSON.parse(file);
     stored.forEach((quiz) => {
-      quizTemplates.set(quiz.id, quiz);
+      if (!quiz?.id || !quiz?.questions) return;
+      quizTemplates.set(quiz.id, {
+        ...quiz,
+        questionDuration: Number(quiz.questionDuration) || 20,
+        createdAt: quiz.createdAt || Date.now(),
+        source: quiz.source || null,
+      });
     });
   } catch (error) {
     if (error.code !== 'ENOENT') {
@@ -79,7 +84,7 @@ function serializeHomeworkForStorage() {
 }
 
 async function persistHomeworkSessions() {
-  await fs.mkdir(DATA_DIR, { recursive: true });
+  await ensureDataDir();
   const payload = JSON.stringify(serializeHomeworkForStorage());
   await fs.writeFile(HOMEWORK_FILE, payload, 'utf8');
 }
@@ -140,6 +145,55 @@ function formatLeaderboard(session) {
 
 function formatHomeworkLeaderboard(session) {
   return Array.from(session.submissions.values()).sort((a, b) => b.score - a.score);
+}
+
+function sanitizeQuestions(rawQuestions = []) {
+  return rawQuestions
+    .filter((q) => q && q.prompt && q.answer)
+    .map((q) => ({
+      prompt: q.prompt.trim(),
+      answer: q.answer.trim(),
+      alternateAnswers: Array.isArray(q.alternateAnswers)
+        ? q.alternateAnswers.map((alt) => alt.trim()).filter(Boolean)
+        : [],
+      partialAnswers: Array.isArray(q.partialAnswers)
+        ? q.partialAnswers.map((alt) => alt.trim()).filter(Boolean)
+        : [],
+      media: buildMediaPayload(q.media),
+    }))
+    .filter((q) => q.prompt && q.answer);
+}
+
+function createQuizTemplate({ title, questions, questionDuration, sourceMeta = null }) {
+  const sanitizedQuestions = sanitizeQuestions(questions);
+  if (!sanitizedQuestions.length) {
+    return null;
+  }
+
+  let templateId;
+  do {
+    templateId = generateQuizCode();
+  } while (quizTemplates.has(templateId));
+
+  const template = {
+    id: templateId,
+    title: title?.trim() || 'Classroom Quiz',
+    questions: sanitizedQuestions,
+    questionDuration: Number(questionDuration) || 20,
+    createdAt: Date.now(),
+  };
+
+  if (sourceMeta) {
+    template.source = sourceMeta;
+  }
+
+  quizTemplates.set(templateId, template);
+  persistQuizzes().catch((error) => {
+    /* eslint-disable no-console */
+    console.error('Failed to save quiz to disk', error);
+  });
+
+  return template;
 }
 
 function createHomeworkSession(template, { dueAt = null } = {}) {
@@ -397,6 +451,8 @@ function endQuestion(sessionId, { fastForward = false } = {}) {
   scheduleLeaderboard(sessionId, { fastForward });
 }
 
+await ensureDataDir();
+await ensureMediaDir();
 await loadPersistedQuizzes();
 await loadPersistedHomeworkSessions();
 
@@ -406,40 +462,13 @@ io.on('connection', (socket) => {
       socket.emit('host:error', 'Please add at least one question.');
       return;
     }
-    const sanitizedQuestions = questions
-      .filter((q) => q && q.prompt && q.answer)
-      .map((q) => ({
-        prompt: q.prompt.trim(),
-        answer: q.answer.trim(),
-        alternateAnswers: Array.isArray(q.alternateAnswers)
-          ? q.alternateAnswers.map((alt) => alt.trim()).filter(Boolean)
-          : [],
-        partialAnswers: Array.isArray(q.partialAnswers)
-          ? q.partialAnswers.map((alt) => alt.trim()).filter(Boolean)
-          : [],
-        media: buildMediaPayload(q.media),
-      }));
-    if (!sanitizedQuestions.length) {
+    const template = createQuizTemplate({ title, questions, questionDuration });
+    if (!template) {
       socket.emit('host:error', 'Questions need both prompts and answers.');
       return;
     }
 
-    const templateId = generateQuizCode();
-    const template = {
-      id: templateId,
-      title: title?.trim() || 'Classroom Quiz',
-      questions: sanitizedQuestions,
-      questionDuration: Number(questionDuration) || 20,
-      createdAt: Date.now(),
-    };
-    quizTemplates.set(templateId, template);
-
     const session = createSessionFromTemplate(template);
-
-    persistQuizzes().catch((error) => {
-      /* eslint-disable no-console */
-      console.error('Failed to save quiz to disk', error);
-    });
 
     socket.join(`${QUIZ_ROOM_PREFIX}${session.id}`);
     socket.emit('host:quizCreated', { quizId: session.id, templateId });
@@ -688,6 +717,7 @@ io.on('connection', (socket) => {
 });
 
 app.use(express.static('public'));
+app.use('/media', express.static(MEDIA_DIR));
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });
@@ -825,8 +855,70 @@ app.post('/api/homework/:homeworkId/submit', async (req, res) => {
       prompt: entry.prompt,
       submitted: entry.submitted,
       correctAnswer: entry.correctAnswer,
-    }));
+  }));
   res.json({ submission, leaderboard, review });
+});
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 },
+});
+
+app.post('/api/quizzes/import/apkg', upload.single('apkg'), async (req, res) => {
+  if (!req.file) {
+    res.status(400).json({ error: 'Please upload an .apkg file.' });
+    return;
+  }
+  if (!req.file.originalname.endsWith('.apkg')) {
+    res.status(400).json({ error: 'Only .apkg files are supported.' });
+    return;
+  }
+
+  try {
+    const importResult = await importApkg(req.file.buffer, req.file.originalname);
+    const alreadyImported = Array.from(quizTemplates.values()).some(
+      (template) => template.source?.sha256 && template.source.sha256 === importResult.sha256,
+    );
+
+    if (alreadyImported) {
+      res.status(409).json({ error: 'This package has already been imported.' });
+      return;
+    }
+
+    const created = [];
+    importResult.templates.forEach((templateData) => {
+      const template = createQuizTemplate({
+        title: templateData.deckName || templateData.title || 'Imported deck',
+        questions: templateData.questions,
+        questionDuration: 20,
+        sourceMeta: {
+          type: 'apkg',
+          sha256: importResult.sha256,
+          deckId: templateData.deckId,
+          deckName: templateData.deckName,
+          fileName: req.file.originalname,
+        },
+      });
+      if (template) {
+        created.push({
+          id: template.id,
+          title: template.title,
+          questionCount: template.questions.length,
+        });
+      }
+    });
+
+    if (!created.length) {
+      res.status(400).json({ error: 'No quizzes could be created from this package.' });
+      return;
+    }
+
+    res.json({ created, skipped: [] });
+  } catch (error) {
+    /* eslint-disable no-console */
+    console.error('Failed to import apkg', error);
+    res.status(500).json({ error: 'Failed to import the Anki package.' });
+  }
 });
 
 server.listen(PORT, HOST, () => {
