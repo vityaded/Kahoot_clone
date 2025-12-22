@@ -40,15 +40,28 @@ function detectMediaRefs(fieldValue = '', mediaLookup = new Set()) {
 
 function determineMediaType(fileName, hint = null) {
   const mimeType = mime.lookup(fileName) || '';
-  if (hint === 'audio' || mimeType.startsWith('audio/')) return 'audio';
-  if (hint === 'image' || mimeType.startsWith('image/')) return 'image';
-  if (hint === 'video' || mimeType.startsWith('video/')) return 'video';
+  const typeFromMime = mimeType.startsWith('video/')
+    ? 'video'
+    : mimeType.startsWith('audio/')
+      ? 'audio'
+      : mimeType.startsWith('image/')
+        ? 'image'
+        : null;
+
+  const hintType = ['audio', 'image', 'video'].includes(hint) ? hint : null;
 
   const ext = path.extname(fileName).toLowerCase();
-  if (['.mp3', '.wav', '.ogg', '.m4a'].includes(ext)) return 'audio';
-  if (['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'].includes(ext)) return 'image';
-  if (['.mp4', '.mov', '.avi', '.webm', '.mkv'].includes(ext)) return 'video';
-  return null;
+  const typeFromExtension = ['.mp3', '.wav', '.ogg', '.m4a'].includes(ext)
+    ? 'audio'
+    : ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'].includes(ext)
+      ? 'image'
+      : ['.mp4', '.mov', '.avi', '.webm', '.mkv'].includes(ext)
+        ? 'video'
+        : null;
+
+  const type = typeFromMime || hintType || typeFromExtension;
+
+  return { type, mimeType: mimeType || null };
 }
 
 function parseDbRows(result) {
@@ -93,11 +106,11 @@ async function resolveMedia(ref, zip, nameToKey, cache) {
   if (!file) return null;
 
   const buffer = await file.async('nodebuffer');
-  const type = determineMediaType(ref.name, ref.hint);
+  const { type, mimeType } = determineMediaType(ref.name, ref.hint);
   if (!type) return null;
 
   const src = await saveMediaAsset(buffer, ref.name);
-  const media = { type, name: ref.name, src };
+  const media = { type, name: ref.name, src, mime: mimeType || null };
   cache.set(ref.name, media);
   return media;
 }
