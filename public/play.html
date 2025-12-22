@@ -264,6 +264,15 @@
       toggleLeaderboard(false);
     });
 
+    socket.on('quiz:terminated', ({ reason }) => {
+      stopTimer();
+      questionProgress.textContent = 'Quiz closed';
+      questionText.textContent = reason === 'deleted' ? 'This quiz was deleted by the teacher.' : 'Quiz closed.';
+      answerForm.classList.add('hidden');
+      questionMedia.innerHTML = '';
+      timerEl.textContent = '--';
+    });
+
     socket.on('player:answerResult', ({ correct, partial, earned, correctAnswer, playerAnswer }) => {
       if (correct) {
         answerFeedback.textContent = `Correct! +${earned} points`;

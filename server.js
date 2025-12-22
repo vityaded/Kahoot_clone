@@ -3,13 +3,14 @@ import http from 'http';
 import { Server } from 'socket.io';
 import { customAlphabet, nanoid } from 'nanoid';
 import { promises as fs } from 'fs';
+import path from 'path';
 import multer from 'multer';
 import {
   evaluateAnswer,
   normalise,
   scoreSubmission,
 } from './server/evaluation.js';
-import { DATA_FILE, HOMEWORK_FILE, MEDIA_DIR, ensureDataDir, ensureMediaDir } from './server/storage.js';
+import { DATA_DIR, DATA_FILE, HOMEWORK_FILE, MEDIA_DIR, ensureDataDir, ensureMediaDir } from './server/storage.js';
 import importApkg from './server/importApkg.js';
 
 const app = express();
@@ -164,6 +165,15 @@ function sanitizeQuestions(rawQuestions = []) {
     .filter((q) => q.prompt && q.answer);
 }
 
+function collectMediaSrcsFromQuestions(questions = []) {
+  const out = new Set();
+  for (const q of questions) {
+    const src = q?.media?.src;
+    if (src && typeof src === 'string') out.add(src);
+  }
+  return out;
+}
+
 function createQuizTemplate({ title, questions, questionDuration, sourceMeta = null }) {
   const sanitizedQuestions = sanitizeQuestions(questions);
   if (!sanitizedQuestions.length) {
@@ -285,6 +295,69 @@ function clearQuestionState(session) {
   if (session.leaderboardTimer) {
     clearTimeout(session.leaderboardTimer);
     session.leaderboardTimer = null;
+  }
+}
+
+function destroySession(sessionId, reason = 'deleted') {
+  const session = sessions.get(sessionId);
+  if (!session) return;
+
+  clearQuestionState(session);
+  if (session.lobbyTimer) {
+    clearTimeout(session.lobbyTimer);
+    session.lobbyTimer = null;
+    session.lobbyExpiresAt = null;
+  }
+
+  for (const [playerId, player] of session.players) {
+    if (player?.disconnectTimer) {
+      clearTimeout(player.disconnectTimer);
+      player.disconnectTimer = null;
+    }
+    playerSessions.delete(playerId);
+  }
+
+  io.to(`${QUIZ_ROOM_PREFIX}${sessionId}`).emit('quiz:terminated', { reason });
+
+  sessions.delete(sessionId);
+}
+
+function deleteHomeworkForTemplate(templateId) {
+  const deletedIds = [];
+  for (const [hwId, hw] of homeworkSessions) {
+    if (hw?.templateId === templateId) {
+      homeworkSessions.delete(hwId);
+      deletedIds.push(hwId);
+    }
+  }
+  return deletedIds;
+}
+
+async function garbageCollectMedia(candidateSrcs = new Set()) {
+  if (!candidateSrcs.size) return;
+
+  const used = new Set();
+
+  for (const quiz of quizTemplates.values()) {
+    collectMediaSrcsFromQuestions(quiz.questions).forEach((s) => used.add(s));
+  }
+
+  for (const hw of homeworkSessions.values()) {
+    collectMediaSrcsFromQuestions(hw.questions).forEach((s) => used.add(s));
+  }
+
+  const mediaDir = path.join(DATA_DIR, 'media');
+
+  for (const src of candidateSrcs) {
+    if (used.has(src)) continue;
+    if (!src.startsWith('/media/')) continue;
+
+    const fileName = path.basename(src);
+    const absPath = path.join(mediaDir, fileName);
+
+    if (!absPath.startsWith(mediaDir)) continue;
+
+    try { await fs.unlink(absPath); } catch (e) { /* ignore */ }
   }
 }
 
@@ -751,6 +824,51 @@ app.get('/api/quizzes', (_req, res) => {
     .sort((a, b) => b.createdAt - a.createdAt);
 
   res.json(payload);
+});
+
+app.delete('/api/quizzes/:quizId', async (req, res) => {
+  const quizId = req.params.quizId?.trim()?.toUpperCase();
+  const quiz = quizTemplates.get(quizId);
+
+  if (!quiz) {
+    res.status(404).json({ error: 'Quiz not found' });
+    return;
+  }
+
+  const mediaCandidates = new Set();
+  collectMediaSrcsFromQuestions(quiz.questions).forEach((s) => mediaCandidates.add(s));
+
+  for (const hw of homeworkSessions.values()) {
+    if (hw?.templateId === quizId) {
+      collectMediaSrcsFromQuestions(hw.questions).forEach((s) => mediaCandidates.add(s));
+    }
+  }
+
+  const sessionsToKill = [];
+  for (const [sessionId, session] of sessions) {
+    if (session?.templateId === quizId) sessionsToKill.push(sessionId);
+  }
+  sessionsToKill.forEach((id) => destroySession(id, 'deleted'));
+
+  const deletedHomeworkIds = deleteHomeworkForTemplate(quizId);
+
+  quizTemplates.delete(quizId);
+
+  try {
+    await persistQuizzes();
+    await persistHomeworkSessions();
+    await garbageCollectMedia(mediaCandidates);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete quiz' });
+    return;
+  }
+
+  res.json({
+    ok: true,
+    deletedQuizId: quizId,
+    deletedLiveSessions: sessionsToKill.length,
+    deletedHomework: deletedHomeworkIds.length,
+  });
 });
 
 app.post('/api/homework', (req, res) => {
