@@ -158,7 +158,95 @@
       }, 1000);
     }
 
+    function getActiveMedia(container) {
+      return container?.querySelector('video, audio') || null;
+    }
+
+    function removeTapOverlay(container) {
+      container?.querySelector('.tap-to-play-overlay')?.remove();
+    }
+
+    function ensureMediaContainer(container) {
+      if (!container) return;
+      const currentPosition = window.getComputedStyle(container).position;
+      if (currentPosition === 'static') {
+        container.style.position = 'relative';
+      }
+    }
+
+    function stopMedia(container) {
+      const mediaEl = getActiveMedia(container);
+      if (mediaEl) {
+        mediaEl.pause();
+        mediaEl.currentTime = 0;
+      }
+      removeTapOverlay(container);
+    }
+
+    function showTapToPlayOverlay(container, mediaEl, label = 'Tap to play') {
+      if (!container || !mediaEl) return;
+      ensureMediaContainer(container);
+      removeTapOverlay(container);
+
+      const overlay = document.createElement('button');
+      overlay.type = 'button';
+      overlay.textContent = label;
+      overlay.className = 'tap-to-play-overlay';
+      overlay.style.position = 'absolute';
+      overlay.style.inset = '0';
+      overlay.style.display = 'flex';
+      overlay.style.alignItems = 'center';
+      overlay.style.justifyContent = 'center';
+      overlay.style.background = 'rgba(0, 0, 0, 0.35)';
+      overlay.style.color = '#fff';
+      overlay.style.border = 'none';
+      overlay.style.fontWeight = '600';
+      overlay.style.cursor = 'pointer';
+      overlay.style.backdropFilter = 'blur(1px)';
+
+      const removeOverlay = () => removeTapOverlay(container);
+      overlay.addEventListener('click', () => {
+        mediaEl.muted = false;
+        const resumePromise = mediaEl.play();
+        if (resumePromise?.then) {
+          resumePromise.then(removeOverlay).catch(() => {});
+        } else {
+          removeOverlay();
+        }
+      });
+      mediaEl.addEventListener('playing', removeOverlay, { once: true });
+
+      container.appendChild(overlay);
+    }
+
+    function attemptAutoplay(mediaEl, container) {
+      if (!mediaEl) return;
+      mediaEl.currentTime = 0;
+      if (mediaEl.tagName === 'VIDEO') {
+        mediaEl.playsInline = true;
+      }
+      const removeOverlay = () => removeTapOverlay(container);
+      const playPromise = mediaEl.play();
+      if (!playPromise?.catch) {
+        return;
+      }
+      playPromise.then(removeOverlay).catch(() => {
+        mediaEl.muted = true;
+        const mutedAttempt = mediaEl.play();
+        if (mutedAttempt?.catch) {
+          mutedAttempt.then(() => {
+            showTapToPlayOverlay(container, mediaEl, 'Tap to unmute');
+          }).catch(() => {
+            showTapToPlayOverlay(container, mediaEl);
+          });
+        } else {
+          showTapToPlayOverlay(container, mediaEl, 'Tap to unmute');
+        }
+      });
+    }
+
     function renderMedia(media) {
+      stopMedia(questionMedia);
       questionMedia.innerHTML = '';
       if (!media?.src || !media?.type) return;
       if (media.type === 'image') {
@@ -172,6 +260,8 @@
         const audio = document.createElement('audio');
         audio.src = media.src;
         audio.controls = true;
+        audio.autoplay = true;
+        audio.preload = 'auto';
         questionMedia.appendChild(audio);
         return;
       }
@@ -179,6 +269,9 @@
         const video = document.createElement('video');
         video.src = media.src;
         video.controls = true;
+        video.autoplay = true;
+        video.preload = 'auto';
+        video.playsInline = true;
         questionMedia.appendChild(video);
       }
     }
@@ -197,6 +290,10 @@
       stopTimer();
       questionDuration.textContent = '';
       renderMedia(question.media);
+      const mediaEl = getActiveMedia(questionMedia);
+      if (mediaEl) {
+        attemptAutoplay(mediaEl, questionMedia);
+      }
       answerInput.value = answers[index] || '';
       answerInput.focus();
       nextQuestionButton.textContent = index === questions.length - 1 ? 'Submit homework' : 'Next';
@@ -444,6 +541,7 @@
       }
       homeworkError.textContent = '';
       stopTimer();
+      stopMedia(questionMedia);
       try {
         const response = await fetch(`/api/homework/${homeworkCode}/submit`, {
           method: 'POST',
@@ -482,6 +580,7 @@
 
     retakeButton.addEventListener('click', () => {
       stopTimer();
+      stopMedia(questionMedia);
       clearTimeout(feedbackTimer);
       hideFeedbackElements();
       answers = new Array(questions.length).fill('');

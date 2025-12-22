@@ -226,21 +226,137 @@
       playerCount.textContent = `${players.length} player${players.length === 1 ? '' : 's'}`;
     }
 
-    function renderMedia(container, media) {
-      container.innerHTML = '';
-      if (!media) return;
-      if (media.type === 'image') {
-        container.innerHTML = `<img src="${media.src}" alt="Question media" />`;
-      } else if (media.type === 'audio') {
-        container.innerHTML = `<audio controls src="${media.src}"></audio>`;
-      } else if (media.type === 'video') {
-        container.innerHTML = `<video controls src="${media.src}"></video>`;
+    function getActiveMedia(container) {
+      return container?.querySelector('video, audio') || null;
+    }
+
+    function removeTapOverlay(container) {
+      container?.querySelector('.tap-to-play-overlay')?.remove();
+    }
+
+    function stopMedia(container) {
+      const mediaEl = getActiveMedia(container);
+      if (mediaEl) {
+        mediaEl.pause();
+        mediaEl.currentTime = 0;
+      }
+      removeTapOverlay(container);
+    }
+
+    function ensureMediaContainer(container) {
+      if (!container) return;
+      const currentPosition = window.getComputedStyle(container).position;
+      if (currentPosition === 'static') {
+        container.style.position = 'relative';
       }
     }
 
+    function showTapToPlayOverlay(container, mediaEl, label = 'Tap to play') {
+      if (!container || !mediaEl) return;
+      ensureMediaContainer(container);
+      removeTapOverlay(container);
+
+      const overlay = document.createElement('button');
+      overlay.type = 'button';
+      overlay.textContent = label;
+      overlay.className = 'tap-to-play-overlay';
+      overlay.style.position = 'absolute';
+      overlay.style.inset = '0';
+      overlay.style.display = 'flex';
+      overlay.style.alignItems = 'center';
+      overlay.style.justifyContent = 'center';
+      overlay.style.background = 'rgba(0, 0, 0, 0.35)';
+      overlay.style.color = '#fff';
+      overlay.style.border = 'none';
+      overlay.style.fontWeight = '600';
+      overlay.style.cursor = 'pointer';
+      overlay.style.backdropFilter = 'blur(1px)';
+
+      const removeOverlay = () => removeTapOverlay(container);
+      overlay.addEventListener('click', () => {
+        mediaEl.muted = false;
+        const resumePromise = mediaEl.play();
+        if (resumePromise?.then) {
+          resumePromise.then(removeOverlay).catch(() => {});
+        } else {
+          removeOverlay();
+        }
+      });
+      mediaEl.addEventListener('playing', removeOverlay, { once: true });
+
+      container.appendChild(overlay);
+    }
+
+    function attemptAutoplay(mediaEl, container) {
+      if (!mediaEl) return;
+      mediaEl.currentTime = 0;
+      if (mediaEl.tagName === 'VIDEO') {
+        mediaEl.playsInline = true;
+      }
+      const removeOverlay = () => removeTapOverlay(container);
+      const playPromise = mediaEl.play();
+      if (!playPromise?.catch) {
+        return;
+      }
+      playPromise.then(removeOverlay).catch(() => {
+        mediaEl.muted = true;
+        const mutedAttempt = mediaEl.play();
+        if (mutedAttempt?.catch) {
+          mutedAttempt.then(() => {
+            showTapToPlayOverlay(container, mediaEl, 'Tap to unmute');
+          }).catch(() => {
+            showTapToPlayOverlay(container, mediaEl);
+          });
+        } else {
+          showTapToPlayOverlay(container, mediaEl, 'Tap to unmute');
+        }
+      });
+    }
+
+    function renderMedia(container, media, shouldAutoplay = false) {
+      stopMedia(container);
+      container.innerHTML = '';
+      removeTapOverlay(container);
+      if (!media?.src || !media?.type) return null;
+
+      if (media.type === 'image') {
+        const img = document.createElement('img');
+        img.src = media.src;
+        img.alt = 'Question media';
+        container.appendChild(img);
+        return img;
+      }
+
+      if (media.type === 'audio') {
+        const audio = document.createElement('audio');
+        audio.src = media.src;
+        audio.controls = true;
+        audio.autoplay = shouldAutoplay;
+        audio.preload = 'auto';
+        container.appendChild(audio);
+        return audio;
+      }
+
+      if (media.type === 'video') {
+        const video = document.createElement('video');
+        video.src = media.src;
+        video.controls = true;
+        video.autoplay = shouldAutoplay;
+        video.preload = 'auto';
+        video.playsInline = true;
+        container.appendChild(video);
+        return video;
+      }
+
+      return null;
+    }
+
     function showMedia(media) {
-      renderMedia(mediaPreview, media);
-      renderMedia(stageMedia, media);
+      renderMedia(mediaPreview, media, false);
+      const stageEl = renderMedia(stageMedia, media, true);
+      if (stageEl && media?.type !== 'image') {
+        attemptAutoplay(stageEl, stageMedia);
+      }
     }
 
     claimForm.addEventListener('submit', (event) => {
@@ -341,6 +457,8 @@
       endQuestionBtn.disabled = true;
       questionStatus.classList.remove('active');
       stopTimer();
+      stopMedia(stageMedia);
+      stopMedia(mediaPreview);
       mediaPreview.innerHTML = '';
       stageMedia.innerHTML = '';
       stageTimer.textContent = '--';
@@ -361,6 +479,8 @@
       endQuestionBtn.disabled = true;
       stopTimer();
       loopAudio.pause();
+      stopMedia(stageMedia);
+      stopMedia(mediaPreview);
       stagePrompt.textContent = 'Quiz complete!';
       stageProgress.textContent = 'Finished';
       stageTimer.textContent = '--';
@@ -373,6 +493,8 @@
       startQuestionBtn.disabled = true;
       endQuestionBtn.disabled = true;
       stopTimer();
+      stopMedia(stageMedia);
+      stopMedia(mediaPreview);
       mediaPreview.innerHTML = '';
       stageMedia.innerHTML = '';
       stagePrompt.textContent = 'Quiz ended. Reclaim control to restart.';
@@ -396,6 +518,8 @@
           questionStatus.textContent = 'Time\'s up!';
           startQuestionBtn.disabled = true;
           endQuestionBtn.disabled = true;
+          stopMedia(stageMedia);
+          stopMedia(mediaPreview);
           mediaPreview.innerHTML = '';
           stageMedia.innerHTML = '';
           stageTimer.textContent = '0s';
