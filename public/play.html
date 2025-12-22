@@ -354,6 +354,10 @@
       startLobbyCountdown(seconds);
     });
 
+    socket.on('quiz:countdownCancelled', () => {
+      stopLobbyCountdown();
+    });
+
     function handleImmediateSubmit(event) {
       if (!answerForm.requestSubmit || submitButton.disabled) return;
       if (!currentQuizId) return;
