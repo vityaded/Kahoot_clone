@@ -153,11 +153,14 @@
           method: 'POST',
           body: formData,
         });
-        const payload = await response.json();
         if (!response.ok) {
-          setImportStatus(payload?.error || 'Import failed.', true);
+          const data = await response.json().catch(() => ({}));
+          const errorMessage = data?.error || `Import failed (${response.status}).`;
+          setImportStatus(errorMessage, true);
+          alert(errorMessage);
           return;
         }
+        const payload = await response.json();
         const createdCount = payload.created?.length || 0;
         const templateIds = (payload.created || []).map((item) => item.id).join(', ');
         setImportStatus(

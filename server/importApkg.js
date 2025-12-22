@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { promises as fs } from 'fs';
 import path from 'path';
 import JSZip from 'jszip';
 import initSqlJs from 'sql.js';
@@ -165,7 +166,7 @@ async function mapQuestionFromNote(fieldsRaw, model, mediaRefs, resolver) {
   return null;
 }
 
-async function importApkg(buffer, originalFileName = 'upload.apkg') {
+async function parseApkg(buffer, originalFileName = 'upload.apkg') {
   const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
   const zip = await JSZip.loadAsync(buffer);
   const collectionEntry = zip.file('collection.anki2');
@@ -249,6 +250,15 @@ async function importApkg(buffer, originalFileName = 'upload.apkg') {
     sha256,
     fileName: originalFileName,
   };
+}
+
+async function importApkg(buffer, originalFileName = 'upload.apkg') {
+  return parseApkg(buffer, originalFileName);
+}
+
+export async function importApkgFromPath(filePath, originalFileName = 'upload.apkg') {
+  const buffer = await fs.readFile(filePath);
+  return parseApkg(buffer, originalFileName);
 }
 
 export default importApkg;
