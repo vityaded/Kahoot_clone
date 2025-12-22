@@ -361,6 +361,25 @@ async function garbageCollectMedia(candidateSrcs = new Set()) {
   }
 }
 
+function shuffleInPlace(array) {
+  for (let i = array.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+}
+
+function buildRunQuestions(baseQuestions, { count, shuffle } = {}) {
+  const cloned = Array.isArray(baseQuestions) ? baseQuestions.slice() : [];
+  const max = cloned.length;
+  let desired = Number.parseInt(count, 10);
+
+  if (!Number.isFinite(desired) || desired <= 0) desired = max;
+  desired = Math.max(1, Math.min(desired, max));
+
+  if (shuffle) shuffleInPlace(cloned);
+  return cloned.slice(0, desired);
+}
+
 function createSessionFromTemplate(template, hostId = null) {
   const sessionId = generateQuizCode();
   const session = {
@@ -369,7 +388,11 @@ function createSessionFromTemplate(template, hostId = null) {
     hostId,
     title: template.title,
     players: new Map(),
+    baseQuestions: template.questions,
+    baseQuestionCount: template.questions.length,
     questions: template.questions,
+    runSettings: { count: template.questions.length, shuffle: false },
+    runSettingsConfirmed: template.questions.length <= 10,
     questionDuration: template.questionDuration,
     currentQuestionIndex: -1,
     questionStart: null,
@@ -477,6 +500,11 @@ function startQuestion(sessionId) {
   const session = sessions.get(sessionId);
   if (!session) return;
 
+  if (session.hostId && session.baseQuestionCount > 10 && !session.runSettingsConfirmed && session.currentQuestionIndex === -1) {
+    io.to(session.hostId).emit('host:error', 'Choose how many questions to use (and optionally shuffle) before starting.');
+    return;
+  }
+
   if (session.leaderboardTimer) {
     clearTimeout(session.leaderboardTimer);
     session.leaderboardTimer = null;
@@ -569,12 +597,30 @@ io.on('connection', (socket) => {
       return;
     }
 
+    session.baseQuestions = session.baseQuestions || session.questions;
+    session.baseQuestionCount = session.baseQuestionCount || session.questions.length;
+    session.runSettings = session.runSettings || { count: session.questions.length, shuffle: false };
+    session.runSettingsConfirmed =
+      typeof session.runSettingsConfirmed === 'boolean'
+        ? session.runSettingsConfirmed
+        : session.baseQuestionCount <= 10;
+
     session.hostId = socket.id;
+    if (session.lobbyTimer) {
+      clearTimeout(session.lobbyTimer);
+      session.lobbyTimer = null;
+      session.lobbyExpiresAt = null;
+      io.to(`${QUIZ_ROOM_PREFIX}${session.id}`).emit('quiz:countdownCancelled');
+    }
+
     socket.join(`${QUIZ_ROOM_PREFIX}${session.id}`);
     socket.emit('host:claimed', {
       quizId: session.id,
       title: session.title,
       totalQuestions: session.questions.length,
+      baseTotalQuestions: session.baseQuestionCount || session.questions.length,
+      runSettings: session.runSettings || { count: session.questions.length, shuffle: false },
+      runSettingsConfirmed: !!session.runSettingsConfirmed,
       questionDuration: session.questionDuration,
       leaderboard: formatLeaderboard(session),
       currentQuestionIndex: session.currentQuestionIndex,
@@ -644,7 +690,7 @@ io.on('connection', (socket) => {
     }
     emitLeaderboard(session.id);
 
-    if (session.players.size === 1 && session.currentQuestionIndex === -1 && !session.lobbyTimer) {
+    if (!session.hostId && session.players.size === 1 && session.currentQuestionIndex === -1 && !session.lobbyTimer) {
       session.lobbyExpiresAt = Date.now() + 15000;
       session.lobbyTimer = setTimeout(() => startQuestion(session.id), 15000);
       io.to(`${QUIZ_ROOM_PREFIX}${session.id}`).emit('quiz:countdown', { seconds: 15 });
@@ -661,6 +707,50 @@ io.on('connection', (socket) => {
     if (!session || session.hostId !== socket.id) return;
 
     startQuestion(quizId);
+  });
+
+  socket.on('host:configureRun', ({ quizId, count, shuffle }) => {
+    const session = sessions.get(quizId?.trim()?.toUpperCase());
+    if (!session) {
+      socket.emit('host:error', 'Quiz not found. Double check the code.');
+      return;
+    }
+    if (session.hostId !== socket.id) return;
+
+    if (session.currentQuestionIndex !== -1 || session.questionActive) {
+      socket.emit('host:error', 'You can only configure the run before starting.');
+      return;
+    }
+
+    const base =
+      session.baseQuestions ||
+      quizTemplates.get(session.templateId)?.questions ||
+      session.questions ||
+      [];
+    session.baseQuestions = Array.isArray(base) ? base : [];
+    session.baseQuestionCount = session.baseQuestions.length;
+    const questions = buildRunQuestions(session.baseQuestions, { count, shuffle: !!shuffle });
+
+    session.questions = questions;
+    session.runSettings = { count: questions.length, shuffle: !!shuffle };
+    session.runSettingsConfirmed = true;
+
+    session.currentQuestionIndex = -1;
+    clearQuestionState(session);
+
+    if (session.lobbyTimer) {
+      clearTimeout(session.lobbyTimer);
+      session.lobbyTimer = null;
+      session.lobbyExpiresAt = null;
+      io.to(`${QUIZ_ROOM_PREFIX}${session.id}`).emit('quiz:countdownCancelled');
+    }
+
+    socket.emit('host:runConfigured', {
+      totalQuestions: session.questions.length,
+      baseTotalQuestions: base.length,
+      runSettings: session.runSettings,
+    });
+    io.to(`${QUIZ_ROOM_PREFIX}${session.id}`).emit('quiz:meta', { totalQuestions: session.questions.length, title: session.title });
   });
 
   socket.on('player:reconnect', ({ playerId, quizId }) => {

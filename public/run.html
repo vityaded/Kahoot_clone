@@ -61,6 +61,22 @@
         <h2>Control room</h2>
         <div id="question-status" class="question-status">No question running.</div>
         <div id="media-preview" class="media-preview"></div>
+        <div class="run-setup">
+          <p class="eyebrow">Run setup</p>
+
+          <label>
+            Questions this run
+            <input type="number" id="run-question-count" min="1" step="1" />
+          </label>
+
+          <label class="inline-check">
+            <input type="checkbox" id="run-shuffle" />
+            Shuffle questions randomly
+          </label>
+
+          <button type="button" id="apply-run-settings" class="ghost">Apply setup</button>
+          <p id="run-setup-hint" class="muted"></p>
+        </div>
         <button type="button" id="start-question" disabled>Start next question</button>
         <button type="button" id="end-question" class="ghost" disabled>End current question</button>
       </section>
@@ -155,12 +171,19 @@
     const qrTrigger = document.getElementById('qr-trigger');
     const footer = document.querySelector('.host-footer');
     const footerToggle = document.getElementById('footer-toggle');
+    const runCountInput = document.getElementById('run-question-count');
+    const runShuffleInput = document.getElementById('run-shuffle');
+    const applyRunBtn = document.getElementById('apply-run-settings');
+    const runSetupHint = document.getElementById('run-setup-hint');
 
     let quizId = null;
     let timerId = null;
     let countdownId = null;
     let quizTitle = '';
     let totalQuestions = 0;
+    let currentDuration = 0;
+    let baseTotalQuestions = 0;
+    let runSettingsConfirmed = true;
 
     function normalizeHostCode(raw) {
       const trimmed = raw?.trim();
@@ -370,15 +393,29 @@
       socket.emit('host:claimHost', { quizId: normalized });
     });
 
-    socket.on('host:claimed', ({ quizId: id, title, totalQuestions: total, questionDuration, leaderboard }) => {
+    socket.on('host:claimed', ({ quizId: id, title, totalQuestions: total, baseTotalQuestions: baseTotal, runSettings, runSettingsConfirmed: confirmed, questionDuration, leaderboard, currentQuestionIndex, questionActive }) => {
       quizId = id;
       quizTitle = title;
       totalQuestions = total;
+      baseTotalQuestions = baseTotal || total;
+      runSettingsConfirmed = confirmed ?? (baseTotalQuestions <= 10);
+      const requiresSetup = baseTotalQuestions > 10 && !runSettingsConfirmed && currentQuestionIndex === -1;
+      runCountInput.max = baseTotalQuestions;
+      runCountInput.value = requiresSetup ? Math.min(10, baseTotalQuestions) : (runSettings?.count || total);
+      runShuffleInput.checked = !!runSettings?.shuffle;
+      const setupLocked = currentQuestionIndex >= 0 || questionActive;
+      runCountInput.disabled = setupLocked;
+      runShuffleInput.disabled = setupLocked;
+      applyRunBtn.disabled = setupLocked;
+      runSetupHint.textContent = requiresSetup
+        ? 'Pick how many questions to include (optionally shuffle), then click Apply to enable Start.'
+        : '';
       saveHostCredentials(id);
+      currentDuration = questionDuration;
       updateMeta(questionDuration);
       sessionCode.textContent = `Player session code: ${id}`;
       quizCodeInput.value = id;
-      startQuestionBtn.disabled = false;
+      startQuestionBtn.disabled = requiresSetup || questionActive;
       endQuestionBtn.disabled = true;
       durationInput.value = questionDuration;
       renderLeaderboard(leaderboard);
@@ -406,8 +443,19 @@
       renderLeaderboard(players);
     });
 
+    socket.on('quiz:meta', ({ totalQuestions: metaTotal, title }) => {
+      if (Number.isFinite(metaTotal)) {
+        totalQuestions = metaTotal;
+      }
+      if (title) {
+        quizTitle = title;
+      }
+      updateMeta();
+    });
+
     socket.on('quiz:durationChanged', ({ duration }) => {
       durationInput.value = duration;
+      currentDuration = duration;
       updateMeta(duration);
     });
 
@@ -426,17 +474,43 @@
       socket.emit('host:updateDuration', { quizId, duration: durationInput.value });
     });
 
+    applyRunBtn.addEventListener('click', () => {
+      if (!quizId) return;
+      const count = Number.parseInt(runCountInput.value, 10);
+      const shuffle = !!runShuffleInput.checked;
+
+      socket.emit('host:configureRun', { quizId, count, shuffle });
+    });
+
     socket.on('host:durationUpdated', ({ duration }) => {
       durationInput.value = duration;
       countdownBanner.textContent = `Updated: ${duration}s per question for upcoming rounds.`;
+      currentDuration = duration;
       updateMeta(duration);
       setTimeout(() => { countdownBanner.textContent = ''; }, 3000);
+    });
+
+    socket.on('host:runConfigured', ({ totalQuestions: newTotal, baseTotalQuestions: baseTotal, runSettings }) => {
+      totalQuestions = newTotal;
+      baseTotalQuestions = baseTotal || baseTotalQuestions;
+      runSettingsConfirmed = true;
+
+      runCountInput.value = runSettings.count;
+      runShuffleInput.checked = !!runSettings.shuffle;
+      startQuestionBtn.disabled = false;
+      runSetupHint.textContent = `Ready: ${runSettings.count} question(s) ${runSettings.shuffle ? '(shuffled)' : ''}.`;
+
+      updateMeta();
     });
 
     socket.on('question:start', ({ prompt, index, total, duration, media }) => {
       questionStatus.textContent = `Question ${index}/${total}: ${prompt}`;
       startQuestionBtn.disabled = true;
       endQuestionBtn.disabled = false;
+      runCountInput.disabled = true;
+      runShuffleInput.disabled = true;
+      applyRunBtn.disabled = true;
+      runSetupHint.textContent = '';
       questionStatus.classList.add('active');
       setTimeout(() => questionStatus.classList.remove('active'), 500);
       stagePrompt.textContent = prompt;
@@ -523,6 +597,10 @@
       startLobbyCountdown(seconds);
     });
 
+    socket.on('quiz:countdownCancelled', () => {
+      stopCountdownBanner();
+    });
+
     function countdown(seconds) {
       stopTimer();
       let remaining = seconds;
@@ -555,7 +633,16 @@
     }
 
     function updateMeta(duration) {
-      quizMeta.textContent = `${quizTitle} · ${totalQuestions} question(s) · ${duration}s each`;
+      const parsedDuration = Number(duration);
+      if (Number.isFinite(parsedDuration) && parsedDuration > 0) {
+        currentDuration = parsedDuration;
+      }
+
+      const baseInfo = baseTotalQuestions && baseTotalQuestions !== totalQuestions
+        ? `${totalQuestions}/${baseTotalQuestions} selected`
+        : `${totalQuestions} question(s)`;
+      const durationLabel = currentDuration ? `${currentDuration}s each` : 'Duration not set';
+      quizMeta.textContent = `${quizTitle} · ${baseInfo} · ${durationLabel}`;
     }
 
     function renderOverlay(players, duration) {
