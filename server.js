@@ -3,6 +3,7 @@ import http from 'http';
 import { Server } from 'socket.io';
 import { customAlphabet, nanoid } from 'nanoid';
 import { promises as fs } from 'fs';
+import os from 'os';
 import path from 'path';
 import multer from 'multer';
 import {
@@ -11,7 +12,7 @@ import {
   scoreSubmission,
 } from './server/evaluation.js';
 import { DATA_DIR, DATA_FILE, HOMEWORK_FILE, MEDIA_DIR, ensureDataDir, ensureMediaDir } from './server/storage.js';
-import importApkg from './server/importApkg.js';
+import { importApkgFromPath } from './server/importApkg.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -1067,23 +1068,26 @@ app.post('/api/homework/:homeworkId/submit', async (req, res) => {
   res.json({ submission, leaderboard, review });
 });
 
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 },
+const apkgUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, os.tmpdir()),
+    filename: (req, file, cb) => cb(null, `apkg_${Date.now()}_${file.originalname}`),
+  }),
+  limits: { fileSize: 300 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const ok = file.originalname?.toLowerCase().endsWith('.apkg');
+    cb(ok ? null : new Error('Only .apkg files are allowed'), ok);
+  },
 });
 
-app.post('/api/quizzes/import/apkg', upload.single('apkg'), async (req, res) => {
+app.post('/api/quizzes/import/apkg', apkgUpload.single('apkg'), async (req, res) => {
   if (!req.file) {
     res.status(400).json({ error: 'Please upload an .apkg file.' });
     return;
   }
-  if (!req.file.originalname.endsWith('.apkg')) {
-    res.status(400).json({ error: 'Only .apkg files are supported.' });
-    return;
-  }
 
   try {
-    const importResult = await importApkg(req.file.buffer, req.file.originalname);
+    const importResult = await importApkgFromPath(req.file.path, req.file.originalname);
     const alreadyImported = Array.from(quizTemplates.values()).some(
       (template) => template.source?.sha256 && template.source.sha256 === importResult.sha256,
     );
@@ -1126,7 +1130,26 @@ app.post('/api/quizzes/import/apkg', upload.single('apkg'), async (req, res) => 
     /* eslint-disable no-console */
     console.error('Failed to import apkg', error);
     res.status(500).json({ error: 'Failed to import the Anki package.' });
+  } finally {
+    if (req.file?.path) {
+      try {
+        await fs.unlink(req.file.path);
+      } catch (cleanupError) {
+        /* eslint-disable no-console */
+        console.error('Failed to remove uploaded apkg', cleanupError);
+      }
+    }
   }
+});
+
+app.use((err, req, res, next) => {
+  if (err && err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({ error: 'File too large. Increase upload limit or upload a smaller .apkg.' });
+  }
+  if (err) {
+    return res.status(400).json({ error: err.message || 'Upload failed.' });
+  }
+  next();
 });
 
 server.listen(PORT, HOST, () => {
