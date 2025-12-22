@@ -82,6 +82,7 @@
           <div class="quiz-actions">
             <a class="button ghost" href="/run.html?quizId=${quiz.id}">Run</a>
             <a class="button ghost" href="/homework.html?quizId=${quiz.id}">Assign as homework</a>
+            <button type="button" class="button danger delete" data-id="${quiz.id}">Delete</button>
             <button type="button" class="copy" data-code="${quiz.id}">Copy code</button>
           </div>
         `;
@@ -92,6 +93,25 @@
           navigator.clipboard.writeText(button.dataset.code);
           button.textContent = 'Copied!';
           setTimeout(() => { button.textContent = 'Copy code'; }, 1200);
+        });
+      });
+      quizList.querySelectorAll('.delete').forEach((button) => {
+        button.addEventListener('click', async () => {
+          const id = button.dataset.id;
+          if (!confirm(`Delete quiz ${id}? This will remove it and any homework/live sessions created from it.`)) return;
+
+          button.disabled = true;
+          try {
+            const resp = await fetch(`/api/quizzes/${id}`, { method: 'DELETE' });
+            if (!resp.ok) {
+              const data = await resp.json().catch(() => ({}));
+              alert(data.error || 'Failed to delete quiz.');
+            }
+          } catch (e) {
+            alert('Failed to delete quiz.');
+          } finally {
+            await loadQuizzes();
+          }
         });
       });
     }

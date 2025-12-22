@@ -429,6 +429,19 @@ button.ghost {
   box-shadow: none;
 }
 
+.button.danger,
+button.danger {
+  background: transparent;
+  border: 1px solid rgba(255, 90, 90, 0.55);
+  color: rgba(255, 220, 220, 1);
+  box-shadow: none;
+}
+
+.button.danger:hover,
+button.danger:hover {
+  box-shadow: 0 14px 28px rgba(255, 90, 90, 0.2);
+}
+
 .error {
   color: var(--error);
   font-weight: 600;

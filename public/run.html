@@ -504,6 +504,21 @@
       hostBody.classList.remove('question-live');
     });
 
+    socket.on('quiz:terminated', ({ reason }) => {
+      questionStatus.textContent = reason === 'deleted' ? 'This quiz was deleted.' : 'Quiz ended.';
+      startQuestionBtn.disabled = true;
+      endQuestionBtn.disabled = true;
+      stopTimer();
+      stopMedia(stageMedia);
+      stopMedia(mediaPreview);
+      mediaPreview.innerHTML = '';
+      stageMedia.innerHTML = '';
+      stagePrompt.textContent = 'Session closed.';
+      stageProgress.textContent = 'Closed';
+      stageTimer.textContent = '--';
+      stageChip.textContent = 'Closed';
+    });
+
     socket.on('quiz:countdown', ({ seconds }) => {
       startLobbyCountdown(seconds);
     });
