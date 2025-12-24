@@ -48,6 +48,18 @@
         </div>
         <div class="muted" id="strictness-llm">LLM fallback: —</div>
       </div>
+      <div class="strictness-controls">
+        <label class="eyebrow" for="strictness-select">Set difficulty level</label>
+        <div class="strictness-actions">
+          <select id="strictness-select">
+            <option value="strict">Strict</option>
+            <option value="normal">Normal</option>
+            <option value="lenient">Lenient</option>
+          </select>
+          <button type="button" class="button" id="save-strictness">Update</button>
+        </div>
+        <p class="muted" id="strictness-status" aria-live="polite"></p>
+      </div>
       <p class="muted" id="strictness-rules"></p>
     </section>
 
@@ -106,7 +118,11 @@
     const openStrictnessModal = document.getElementById('open-strictness-modal');
     const closeStrictnessModal = document.getElementById('close-strictness-modal');
     const strictnessModal = document.getElementById('strictness-modal');
+    const strictnessSelect = document.getElementById('strictness-select');
+    const strictnessSave = document.getElementById('save-strictness');
+    const strictnessStatus = document.getElementById('strictness-status');
     let isImporting = false;
+    let lastStrictness = 'normal';
 
     function formatDate(timestamp) {
       const date = new Date(timestamp);
@@ -211,6 +227,9 @@
       strictnessSummary.textContent = copy.summary;
       strictnessModalSummary.textContent = copy.summary;
       strictnessPill.textContent = copy.title;
+      lastStrictness = strictness;
+      strictnessSelect.value = strictness;
+      strictnessSave.disabled = true;
 
       strictnessOk.innerHTML = '';
       copy.ok.forEach((item) => {
@@ -241,6 +260,11 @@
       } else {
         strictnessLlm.textContent = 'LLM fallback: disabled (strict mode)';
       }
+    }
+
+    function setStrictnessStatus(message, isError = false) {
+      strictnessStatus.textContent = message;
+      strictnessStatus.style.color = isError ? '#e24a68' : 'var(--muted)';
     }
 
     async function loadQuizzes() {
@@ -314,6 +338,34 @@
       .catch(() => {
         strictnessSummary.textContent = 'Unable to load strictness settings right now.';
       });
+
+    strictnessSelect.addEventListener('change', () => {
+      strictnessSave.disabled = strictnessSelect.value === lastStrictness;
+      setStrictnessStatus('');
+    });
+
+    strictnessSave.addEventListener('click', async () => {
+      const selected = strictnessSelect.value;
+      strictnessSave.disabled = true;
+      setStrictnessStatus('Saving update…');
+      try {
+        const response = await fetch('/api/settings/answer-strictness', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ strictness: selected }),
+        });
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          throw new Error(data?.error || 'Unable to update strictness.');
+        }
+        const payload = await response.json();
+        renderStrictnessDetails(payload);
+        setStrictnessStatus('Saved. New difficulty level applied.');
+      } catch (error) {
+        setStrictnessStatus(error.message || 'Unable to update strictness right now.', true);
+        strictnessSave.disabled = strictnessSelect.value === lastStrictness;
+      }
+    });
 
     function toggleStrictnessModal(show) {
       if (show) {

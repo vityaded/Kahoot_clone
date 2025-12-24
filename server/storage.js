@@ -5,6 +5,7 @@ import crypto from 'crypto';
 export const DATA_DIR = path.join(process.cwd(), 'data');
 export const DATA_FILE = path.join(DATA_DIR, 'quizzes.json');
 export const HOMEWORK_FILE = path.join(DATA_DIR, 'homework.json');
+export const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 export const MEDIA_DIR = path.join(DATA_DIR, 'media');
 
 async function ensureDir(directory) {
