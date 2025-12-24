@@ -8,21 +8,16 @@ const OPENAI_API_KEY = (process.env.OPENAI_API_KEY || '').trim();
 const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || '').trim();
 
 // Provider priority:
-// 1) OpenAI (if key present)
-// 2) Gemini (if key present)
-// 3) Local OpenAI-compatible endpoint (if LM_URL present)
+// 1) Gemini (if key present)
+// 2) OpenAI (if key present)
 // If multiple are present, we will try them in order and fall back on errors.
 const PROVIDERS = [];
-if (OPENAI_API_KEY) PROVIDERS.push('openai');
 if (GEMINI_API_KEY) PROVIDERS.push('gemini');
-if ((process.env.LM_URL || '').trim()) PROVIDERS.push('local');
+if (OPENAI_API_KEY) PROVIDERS.push('openai');
 
 const OPENAI_MODEL = (process.env.OPENAI_MODEL || 'gpt-4.1-nano').trim();
 const GEMINI_MODEL = (process.env.GEMINI_MODEL || 'gemma-3-27b-it').trim();
-const LOCAL_MODEL = (process.env.LM_MODEL || 'gemma-3-12b-it-qat').trim();
-
 const OPENAI_URL = (process.env.OPENAI_URL || 'https://api.openai.com/v1/chat/completions').trim();
-const LOCAL_URL = (process.env.LM_URL || 'http://91.230.199.109:5000/v1/chat/completions').trim();
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
   GEMINI_MODEL,
 )}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`;
@@ -224,14 +219,6 @@ export async function judgeAnswerWithLlm({ questionPrompt, expectedAnswers, subm
         } else if (provider === 'gemini') {
           rawText = await callGemini({
             url: GEMINI_URL,
-            systemPrompt,
-            userPrompt,
-          });
-        } else {
-          rawText = await callOpenAiCompatible({
-            url: LOCAL_URL,
-            apiKey: '',
-            model: LOCAL_MODEL,
             systemPrompt,
             userPrompt,
           });
