@@ -19,7 +19,15 @@ import {
   parseAnswerStrictness,
   saveAnswerStrictness,
 } from './server/settings.js';
-import { DATA_DIR, DATA_FILE, HOMEWORK_FILE, MEDIA_DIR, ensureDataDir, ensureMediaDir } from './server/storage.js';
+import {
+  DATA_DIR,
+  DATA_FILE,
+  HOMEWORK_FILE,
+  LIVE_SESSIONS_FILE,
+  MEDIA_DIR,
+  ensureDataDir,
+  ensureMediaDir,
+} from './server/storage.js';
 import { importApkgFromPath } from './server/importApkg.js';
 
 const app = express();
@@ -163,6 +171,95 @@ async function loadPersistedHomeworkSessions() {
     if (error.code !== 'ENOENT') {
       /* eslint-disable no-console */
       console.error('Failed to load homework sessions from disk', error);
+    }
+  }
+}
+
+function serializeLiveSessions() {
+  return Array.from(sessions.values()).map((session) => ({
+    id: session.id,
+    templateId: session.templateId,
+    title: session.title,
+    hostId: session.hostId || null,
+    createdAt: session.createdAt,
+    questionActive: session.questionActive,
+    currentQuestionIndex: session.currentQuestionIndex,
+    questionStart: session.questionStart,
+    answers: Array.from(session.answers || []),
+    questionDuration: session.questionDuration,
+    runSettings: session.runSettings,
+    runSettingsConfirmed: session.runSettingsConfirmed,
+    questions: session.questions,
+    players: Array.from(session.players.values()).map((player) => ({
+      id: player.id,
+      name: player.name,
+      score: player.score,
+      lastSeen: player.lastSeen,
+      socketId: null,
+    })),
+  }));
+}
+
+async function persistLiveSessions() {
+  await ensureDataDir();
+  const payload = JSON.stringify(serializeLiveSessions());
+  await fs.writeFile(LIVE_SESSIONS_FILE, payload, 'utf8');
+}
+
+async function loadPersistedLiveSessions() {
+  try {
+    const file = await fs.readFile(LIVE_SESSIONS_FILE, 'utf8');
+    const stored = JSON.parse(file);
+    stored.forEach((entry) => {
+      if (!entry?.id || !entry?.templateId) return;
+      const template = quizTemplates.get(entry.templateId);
+      if (!template) return;
+
+      const players = new Map();
+      entry.players?.forEach((player) => {
+        if (!player?.id) return;
+        players.set(player.id, {
+          id: player.id,
+          socketId: null,
+          name: player.name || '',
+          score: Number(player.score) || 0,
+          disconnectTimer: null,
+          isConnected: false,
+          disconnectedAt: null,
+          lastSeen: player.lastSeen || null,
+        });
+        playerSessions.set(player.id, entry.id);
+      });
+
+      sessions.set(entry.id, {
+        id: entry.id,
+        templateId: entry.templateId,
+        hostId: null,
+        title: entry.title || template.title,
+        players,
+        baseQuestions: template.questions,
+        baseQuestionCount: template.questions.length,
+        questions: Array.isArray(entry.questions) && entry.questions.length ? entry.questions : template.questions,
+        runSettings: entry.runSettings || { count: template.questions.length, shuffle: false },
+        runSettingsConfirmed: typeof entry.runSettingsConfirmed === 'boolean'
+          ? entry.runSettingsConfirmed
+          : template.questions.length <= 10,
+        questionDuration: Number(entry.questionDuration) || template.questionDuration,
+        currentQuestionIndex: Number.isInteger(entry.currentQuestionIndex) ? entry.currentQuestionIndex : -1,
+        questionStart: null,
+        answers: new Set(Array.isArray(entry.answers) ? entry.answers : []),
+        questionActive: false,
+        createdAt: entry.createdAt || Date.now(),
+        questionTimer: null,
+        leaderboardTimer: null,
+        lobbyTimer: null,
+        lobbyExpiresAt: null,
+      });
+    });
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      /* eslint-disable no-console */
+      console.error('Failed to load live sessions from disk', error);
     }
   }
 }
@@ -381,6 +478,10 @@ function destroySession(sessionId, reason = 'deleted') {
   io.to(`${QUIZ_ROOM_PREFIX}${sessionId}`).emit('quiz:terminated', { reason });
 
   sessions.delete(sessionId);
+  persistLiveSessions().catch((error) => {
+    /* eslint-disable no-console */
+    console.error('Failed to save live sessions', error);
+  });
 }
 
 function deleteHomeworkForTemplate(templateId) {
@@ -601,6 +702,10 @@ function startQuestion(sessionId) {
   });
 
   session.questionTimer = setTimeout(() => endQuestion(sessionId), questionDuration * 1000);
+  persistLiveSessions().catch((error) => {
+    /* eslint-disable no-console */
+    console.error('Failed to save live sessions', error);
+  });
 }
 
 function endQuestion(sessionId, { fastForward = false } = {}) {
@@ -612,6 +717,10 @@ function endQuestion(sessionId, { fastForward = false } = {}) {
     correctAnswer: currentQuestion?.answer,
   });
   scheduleLeaderboard(sessionId, { fastForward });
+  persistLiveSessions().catch((error) => {
+    /* eslint-disable no-console */
+    console.error('Failed to save live sessions', error);
+  });
 }
 
 await ensureDataDir();
@@ -619,6 +728,7 @@ await ensureMediaDir();
 await loadSettings();
 await loadPersistedQuizzes();
 await loadPersistedHomeworkSessions();
+await loadPersistedLiveSessions();
 
 io.on('connection', (socket) => {
   socket.on('host:createQuiz', ({ title, questions, questionDuration }) => {
@@ -700,6 +810,10 @@ io.on('connection', (socket) => {
         socket.emit('quiz:countdown', { seconds: Math.ceil(remainingMs / 1000) });
       }
     }
+    persistLiveSessions().catch((error) => {
+      /* eslint-disable no-console */
+      console.error('Failed to save live sessions', error);
+    });
   });
 
   socket.on('player:join', ({ quizId, name, playerId }) => {
@@ -776,6 +890,10 @@ io.on('connection', (socket) => {
         socket.emit('quiz:countdown', { seconds: Math.ceil(remainingMs / 1000) });
       }
     }
+    persistLiveSessions().catch((error) => {
+      /* eslint-disable no-console */
+      console.error('Failed to save live sessions', error);
+    });
   });
 
   socket.on('host:startQuestion', ({ quizId }) => {
@@ -827,6 +945,10 @@ io.on('connection', (socket) => {
       runSettings: session.runSettings,
     });
     io.to(`${QUIZ_ROOM_PREFIX}${session.id}`).emit('quiz:meta', { totalQuestions: session.questions.length, title: session.title });
+    persistLiveSessions().catch((error) => {
+      /* eslint-disable no-console */
+      console.error('Failed to save live sessions', error);
+    });
   });
 
   socket.on('player:reconnect', ({ playerId, quizId }) => {
@@ -861,6 +983,10 @@ io.on('connection', (socket) => {
     if (session.hostId) {
       io.to(session.hostId).emit('host:playerJoined', formatLeaderboard(session));
     }
+    persistLiveSessions().catch((error) => {
+      /* eslint-disable no-console */
+      console.error('Failed to save live sessions', error);
+    });
   });
 
   socket.on('player:answer', async ({ quizId, answer }) => {
@@ -908,6 +1034,10 @@ io.on('connection', (socket) => {
       }
       endQuestion(session.id, { fastForward: true });
     }
+    persistLiveSessions().catch((error) => {
+      /* eslint-disable no-console */
+      console.error('Failed to save live sessions', error);
+    });
   });
 
   socket.on('host:endQuestion', ({ quizId }) => {
@@ -930,9 +1060,14 @@ io.on('connection', (socket) => {
     session.questionDuration = parsed;
     socket.emit('host:durationUpdated', { duration: parsed });
     io.to(`${QUIZ_ROOM_PREFIX}${quizId}`).emit('quiz:durationChanged', { duration: parsed });
+    persistLiveSessions().catch((error) => {
+      /* eslint-disable no-console */
+      console.error('Failed to save live sessions', error);
+    });
   });
 
   socket.on('disconnect', () => {
+    let mutated = false;
     for (const [sessionId, session] of sessions) {
       if (session.hostId === socket.id) {
         io.to(`${QUIZ_ROOM_PREFIX}${sessionId}`).emit('quiz:ended');
@@ -944,6 +1079,7 @@ io.on('connection', (socket) => {
         }
         session.hostId = null;
         pruneDisconnectedPlayers(sessionId);
+        mutated = true;
         continue;
       }
 
@@ -967,7 +1103,14 @@ io.on('connection', (socket) => {
           emitLeaderboard(sessionId);
           player.disconnectTimer = null;
         }, DISCONNECT_PRUNE_MS);
+        mutated = true;
       }
+    }
+    if (mutated) {
+      persistLiveSessions().catch((error) => {
+        /* eslint-disable no-console */
+        console.error('Failed to save live sessions', error);
+      });
     }
   });
 });
