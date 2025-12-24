@@ -29,7 +29,7 @@ const io = new Server(server);
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 const QUIZ_ROOM_PREFIX = 'quiz-';
-const DISCONNECT_GRACE_MS = 10000;
+const DISCONNECT_PRUNE_MS = 45 * 60 * 1000;
 
 const quizTemplates = new Map();
 const sessions = new Map();
@@ -184,6 +184,29 @@ function formatLeaderboard(session) {
 
 function formatHomeworkLeaderboard(session) {
   return Array.from(session.submissions.values()).sort((a, b) => b.score - a.score);
+}
+
+function countConnectedPlayers(session) {
+  let count = 0;
+  for (const player of session.players.values()) {
+    if (player.isConnected) count += 1;
+  }
+  return count;
+}
+
+function pruneDisconnectedPlayers(sessionId) {
+  const session = sessions.get(sessionId);
+  if (!session) return;
+  for (const [playerId, player] of session.players) {
+    if (player.isConnected) continue;
+    if (player.disconnectTimer) {
+      clearTimeout(player.disconnectTimer);
+      player.disconnectTimer = null;
+    }
+    session.players.delete(playerId);
+    playerSessions.delete(playerId);
+  }
+  emitLeaderboard(sessionId);
 }
 
 function sanitizeQuestions(rawQuestions = []) {
@@ -530,6 +553,7 @@ function scheduleLeaderboard(sessionId, { fastForward = false } = {}) {
   } else {
     session.leaderboardTimer = setTimeout(() => {
       io.to(`${QUIZ_ROOM_PREFIX}${sessionId}`).emit('quiz:finished');
+      pruneDisconnectedPlayers(sessionId);
     }, leaderboardDelay);
   }
 }
@@ -706,7 +730,12 @@ io.on('connection', (socket) => {
         existingPlayer.disconnectTimer = null;
       }
       existingPlayer.socketId = socket.id;
-      existingPlayer.name = displayName;
+      existingPlayer.isConnected = true;
+      existingPlayer.disconnectedAt = null;
+      existingPlayer.lastSeen = Date.now();
+      if (!existingPlayer.name) {
+        existingPlayer.name = displayName;
+      }
     } else {
       session.players.set(resolvedPlayerId, {
         id: resolvedPlayerId,
@@ -714,6 +743,9 @@ io.on('connection', (socket) => {
         name: displayName,
         score: 0,
         disconnectTimer: null,
+        isConnected: true,
+        disconnectedAt: null,
+        lastSeen: Date.now(),
       });
     }
 
@@ -734,7 +766,7 @@ io.on('connection', (socket) => {
     }
     emitLeaderboard(session.id);
 
-    if (!session.hostId && session.players.size === 1 && session.currentQuestionIndex === -1 && !session.lobbyTimer) {
+    if (!session.hostId && countConnectedPlayers(session) === 1 && session.currentQuestionIndex === -1 && !session.lobbyTimer) {
       session.lobbyExpiresAt = Date.now() + 15000;
       session.lobbyTimer = setTimeout(() => startQuestion(session.id), 15000);
       io.to(`${QUIZ_ROOM_PREFIX}${session.id}`).emit('quiz:countdown', { seconds: 15 });
@@ -810,6 +842,9 @@ io.on('connection', (socket) => {
       player.disconnectTimer = null;
     }
     player.socketId = socket.id;
+    player.isConnected = true;
+    player.disconnectedAt = null;
+    player.lastSeen = Date.now();
     playerSessions.set(playerId, sessionId);
 
     socket.join(`${QUIZ_ROOM_PREFIX}${sessionId}`);
@@ -837,6 +872,7 @@ io.on('connection', (socket) => {
 
     const submitted = answer ?? '';
     const currentQuestion = session.questions[session.currentQuestionIndex];
+    player.lastSeen = Date.now();
     const elapsedMs = Date.now() - session.questionStart;
     const questionDuration = resolveQuestionDuration(session);
     const durationMs = questionDuration * 1000;
@@ -860,7 +896,11 @@ io.on('connection', (socket) => {
 
     emitLeaderboard(session.id);
 
-    const allPlayersAnswered = session.answers.size === session.players.size && session.players.size > 0;
+    const connectedIds = Array.from(session.players.values())
+      .filter((entry) => entry.isConnected)
+      .map((entry) => entry.id);
+    const allPlayersAnswered =
+      connectedIds.length > 0 && connectedIds.every((id) => session.answers.has(id));
     if (allPlayersAnswered) {
       if (session.questionTimer) {
         clearTimeout(session.questionTimer);
@@ -903,6 +943,7 @@ io.on('connection', (socket) => {
           session.lobbyExpiresAt = null;
         }
         session.hostId = null;
+        pruneDisconnectedPlayers(sessionId);
         continue;
       }
 
@@ -912,12 +953,20 @@ io.on('connection', (socket) => {
         if (player.disconnectTimer) {
           clearTimeout(player.disconnectTimer);
         }
+        player.isConnected = false;
+        player.disconnectedAt = Date.now();
+        player.lastSeen = Date.now();
+        player.socketId = null;
         player.disconnectTimer = setTimeout(() => {
+          if (player.isConnected) {
+            player.disconnectTimer = null;
+            return;
+          }
           session.players.delete(found.playerId);
           playerSessions.delete(found.playerId);
           emitLeaderboard(sessionId);
           player.disconnectTimer = null;
-        }, DISCONNECT_GRACE_MS);
+        }, DISCONNECT_PRUNE_MS);
       }
     }
   });
