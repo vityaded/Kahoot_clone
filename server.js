@@ -180,11 +180,11 @@ app.post('/api/test-llm', async (req, res) => {
   }
 
   try {
-    const result = await runLlmChat({ prompt, systemPrompt });
+    const result = await runLlmChat({ userPrompt: prompt, systemPrompt });
     res.json({
       provider: result.provider,
       model: result.model,
-      response: result.response,
+      response: result.text,
       log: result.log,
       request: {
         prompt,

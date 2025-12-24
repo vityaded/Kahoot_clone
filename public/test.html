@@ -287,16 +287,21 @@
         }
 
         const data = await response.json();
+        const modelHtml = data.model
+          ? `
+            <div>
+              <p class="eyebrow">Model</p>
+              <p class="summary-value">${data.model}</p>
+            </div>
+          `
+          : '';
         llmResponseEl.innerHTML = `
           <div class="summary-grid">
             <div>
               <p class="eyebrow">Provider</p>
               <p class="summary-value">${data.provider || '—'}</p>
             </div>
-            <div>
-              <p class="eyebrow">Model</p>
-              <p class="summary-value">${data.model || '—'}</p>
-            </div>
+            ${modelHtml}
           </div>
           <p class="summary-value" id="llm-response-text" style="margin-top: 12px;"></p>
         `;

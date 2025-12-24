@@ -102,10 +102,16 @@ export async function runLlmChat({ systemPrompt, userPrompt }) {
       log.push({ provider, step: 'start' });
       const text = await callProvider(provider, systemPrompt, userPrompt);
       log.push({ provider, step: 'success' });
+      const model = provider === 'openai'
+        ? OPENAI_MODEL
+        : provider === 'gemini'
+          ? GEMINI_MODEL
+          : null;
 
       return {
         ok: true,
         provider,
+        model,
         text,
         log,
       };
