@@ -180,13 +180,40 @@
       `;
     }
 
+    function normalizeLogEntry(entry) {
+      if (entry == null) {
+        return null;
+      }
+      if (typeof entry === 'string') {
+        return { message: entry };
+      }
+      if (typeof entry !== 'object') {
+        return { message: String(entry) };
+      }
+
+      const hasProviderStep = entry.provider || entry.step;
+      const message =
+        entry.message
+        || (hasProviderStep ? `[${entry.provider || 'provider'}] ${entry.step || 'step'}` : null)
+        || entry.summary
+        || entry.event
+        || entry.type
+        || 'Log entry';
+
+      const details = entry.details || entry.error || null;
+      return { message, details };
+    }
+
     function renderLog(entries = [], listEl, wrapperEl) {
       listEl.innerHTML = '';
       if (!entries.length) {
         wrapperEl.hidden = true;
         return;
       }
-      entries.forEach((entry) => {
+      entries
+        .map(normalizeLogEntry)
+        .filter(Boolean)
+        .forEach((entry) => {
         const item = document.createElement('li');
         const details = entry.details ? `<pre>${JSON.stringify(entry.details, null, 2)}</pre>` : '';
         item.innerHTML = `<p>${entry.message}</p>${details}`;
