@@ -11,6 +11,7 @@ import {
   normalise,
   scoreSubmission,
 } from './server/evaluation.js';
+import { getAnswerStrictness, getLlmConfigOverrides, getRuleMatchingConfig } from './server/settings.js';
 import { DATA_DIR, DATA_FILE, HOMEWORK_FILE, MEDIA_DIR, ensureDataDir, ensureMediaDir } from './server/storage.js';
 import { importApkgFromPath } from './server/importApkg.js';
 
@@ -30,6 +31,14 @@ const homeworkSessions = new Map();
 const generateQuizCode = customAlphabet('0123456789', 6);
 
 app.use(express.json());
+
+app.get('/api/settings/answer-strictness', (_req, res) => {
+  res.json({
+    strictness: getAnswerStrictness(),
+    ruleConfig: getRuleMatchingConfig(),
+    llmDefaults: getLlmConfigOverrides(),
+  });
+});
 
 function serializeForStorage() {
   return Array.from(quizTemplates.values()).map((quiz) => ({

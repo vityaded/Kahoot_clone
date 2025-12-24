@@ -2,6 +2,8 @@
 // The primary evaluation remains rule-based; the LLM is only consulted
 // when the rule-based checks fail.
 
+import { getLlmConfigOverrides } from './settings.js';
+
 const OPENAI_API_KEY = (process.env.OPENAI_API_KEY || '').trim();
 const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || '').trim();
 
@@ -26,8 +28,12 @@ const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${en
 )}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`;
 
 const REQUEST_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS) || 1800;
-const CONFIDENCE_THRESHOLD = Number(process.env.LLM_ACCEPT_CONFIDENCE) || 0.8;
-const LLM_MODE = (process.env.LLM_JUDGE_MODE || 'strict').trim().toLowerCase();
+const defaults = getLlmConfigOverrides();
+const CONFIDENCE_THRESHOLD =
+  Number(process.env.LLM_ACCEPT_CONFIDENCE) ||
+  defaults.confidenceThreshold;
+const LLM_MODE =
+  (process.env.LLM_JUDGE_MODE || defaults.mode).trim().toLowerCase();
 
 const cache = new Map();
 const MAX_CACHE = 1000;

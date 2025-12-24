@@ -30,6 +30,46 @@
   </header>
 
   <main class="library-grid">
+    <section class="card" id="strictness-card">
+      <div class="card-heading">
+        <div>
+          <p class="eyebrow">Answer grading</p>
+          <h2>Answer grading strictness</h2>
+          <p class="muted" id="strictness-summary">Loading strictness settings…</p>
+        </div>
+        <div class="cta-row">
+          <button type="button" class="button ghost" id="open-strictness-modal">View details</button>
+        </div>
+      </div>
+      <div class="strictness-row">
+        <div>
+          <p class="eyebrow">Current mode</p>
+          <div class="strictness-pill" id="strictness-pill">Normal</div>
+        </div>
+        <div class="muted" id="strictness-llm">LLM fallback: —</div>
+      </div>
+      <p class="muted" id="strictness-rules"></p>
+    </section>
+
+    <div class="modal-overlay hidden" id="strictness-modal" role="dialog" aria-modal="true" aria-labelledby="strictness-modal-title">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">Answer grading</p>
+            <h2 id="strictness-modal-title">Answer grading strictness details</h2>
+          </div>
+          <button type="button" class="button ghost" id="close-strictness-modal">Close</button>
+        </div>
+        <div class="strictness-details">
+          <h3>Acceptance criteria for OK</h3>
+          <ul id="strictness-ok" class="criteria-list"></ul>
+          <h3>Partial credit behavior</h3>
+          <ul id="strictness-partial" class="criteria-list"></ul>
+        </div>
+        <p class="muted" id="strictness-modal-summary"></p>
+      </div>
+    </div>
+
     <section class="card">
       <div class="card-heading">
         <div>
@@ -56,6 +96,16 @@
     const importBtn = document.getElementById('import-apkg');
     const apkgInput = document.getElementById('apkg-input');
     const importStatus = document.getElementById('import-status');
+    const strictnessSummary = document.getElementById('strictness-summary');
+    const strictnessPill = document.getElementById('strictness-pill');
+    const strictnessOk = document.getElementById('strictness-ok');
+    const strictnessPartial = document.getElementById('strictness-partial');
+    const strictnessLlm = document.getElementById('strictness-llm');
+    const strictnessRules = document.getElementById('strictness-rules');
+    const strictnessModalSummary = document.getElementById('strictness-modal-summary');
+    const openStrictnessModal = document.getElementById('open-strictness-modal');
+    const closeStrictnessModal = document.getElementById('close-strictness-modal');
+    const strictnessModal = document.getElementById('strictness-modal');
     let isImporting = false;
 
     function formatDate(timestamp) {
@@ -114,6 +164,83 @@
           }
         });
       });
+    }
+
+    const strictnessCopy = {
+      strict: {
+        title: 'Strict',
+        summary: 'Exact normalized answers only. No synonyms, typo tolerance, or LLM fallback.',
+        ok: [
+          'Exact normalized match (case, punctuation, and diacritics ignored).',
+          'Compact match (ignores spacing/hyphenation, e.g. "well-known" = "well known").',
+        ],
+        partial: [
+          'Only explicit partial answers configured on the question.',
+          'No synonym or typo-based partial credit.',
+        ],
+      },
+      normal: {
+        title: 'Normal',
+        summary: 'Balanced matching with typo tolerance, synonyms, substrings, and LLM fallback.',
+        ok: [
+          'Exact normalized match plus compact match.',
+          'Near-duplicate answers can still count as OK via close-match rules.',
+        ],
+        partial: [
+          'Explicit partial answers.',
+          'Synonyms and close matches may earn partial credit.',
+        ],
+      },
+      lenient: {
+        title: 'Lenient',
+        summary: 'More forgiving matching with extra typo tolerance and LLM fallback.',
+        ok: [
+          'Exact normalized match plus compact match.',
+          'More typo tolerance and close matches accepted.',
+        ],
+        partial: [
+          'Explicit partial answers.',
+          'Synonyms and close matches more likely to earn partial credit.',
+        ],
+      },
+    };
+
+    function renderStrictnessDetails(payload) {
+      const strictness = payload?.strictness || 'normal';
+      const copy = strictnessCopy[strictness] || strictnessCopy.normal;
+      strictnessSummary.textContent = copy.summary;
+      strictnessModalSummary.textContent = copy.summary;
+      strictnessPill.textContent = copy.title;
+
+      strictnessOk.innerHTML = '';
+      copy.ok.forEach((item) => {
+        const li = document.createElement('li');
+        li.textContent = item;
+        strictnessOk.appendChild(li);
+      });
+
+      strictnessPartial.innerHTML = '';
+      copy.partial.forEach((item) => {
+        const li = document.createElement('li');
+        li.textContent = item;
+        strictnessPartial.appendChild(li);
+      });
+
+      const ruleConfig = payload?.ruleConfig || {};
+      const llmDefaults = payload?.llmDefaults || {};
+      const closeMatch = ruleConfig.allowCloseMatch
+        ? `Close-match threshold: ${(ruleConfig.closeMatchThreshold ?? 0.8).toFixed(2)}`
+        : 'Close-match disabled';
+      const synonyms = ruleConfig.allowSynonyms ? 'Synonyms enabled' : 'Synonyms disabled';
+      const substrings = ruleConfig.allowSubstrings ? 'Substring checks enabled' : 'Substring checks disabled';
+      const compact = ruleConfig.allowCompactMatch ? 'Compact match enabled' : 'Compact match disabled';
+      strictnessRules.textContent = `Rules: ${compact} · ${closeMatch} · ${synonyms} · ${substrings}`;
+
+      if (ruleConfig.allowLLMFallback) {
+        strictnessLlm.textContent = `LLM fallback: enabled (${llmDefaults.mode} mode, confidence ≥ ${(llmDefaults.confidenceThreshold ?? 0.8).toFixed(2)})`;
+      } else {
+        strictnessLlm.textContent = 'LLM fallback: disabled (strict mode)';
+      }
     }
 
     async function loadQuizzes() {
@@ -180,6 +307,32 @@
 
     refreshBtn.addEventListener('click', loadQuizzes);
     loadQuizzes();
+
+    fetch('/api/settings/answer-strictness')
+      .then((response) => response.json())
+      .then((payload) => renderStrictnessDetails(payload))
+      .catch(() => {
+        strictnessSummary.textContent = 'Unable to load strictness settings right now.';
+      });
+
+    function toggleStrictnessModal(show) {
+      if (show) {
+        strictnessModal.classList.remove('hidden');
+      } else {
+        strictnessModal.classList.add('hidden');
+      }
+    }
+
+    openStrictnessModal.addEventListener('click', () => toggleStrictnessModal(true));
+    closeStrictnessModal.addEventListener('click', () => toggleStrictnessModal(false));
+    strictnessModal.addEventListener('click', (event) => {
+      if (event.target === strictnessModal) {
+        toggleStrictnessModal(false);
+      }
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') toggleStrictnessModal(false);
+    });
   </script>
 </body>
 </html>
