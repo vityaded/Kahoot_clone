@@ -3,6 +3,7 @@ import { SETTINGS_FILE, ensureDataDir } from './storage.js';
 
 let cachedStrictness = null;
 let cachedLlmFallback = null;
+let cachedLlmPrimary = null;
 
 function normalizeStrictness(value) {
   if (value === undefined || value === null) return null;
@@ -25,12 +26,19 @@ function normalizeLlmFallback(value) {
   return null;
 }
 
+function normalizeLlmPrimary(value) {
+  return normalizeLlmFallback(value);
+}
+
 function buildSettingsPayload() {
   const payload = {
     strictness: getAnswerStrictness(),
   };
   if (cachedLlmFallback !== null) {
     payload.llmFallbackEnabled = cachedLlmFallback;
+  }
+  if (cachedLlmPrimary !== null) {
+    payload.llmPrimaryEnabled = cachedLlmPrimary;
   }
   return payload;
 }
@@ -52,6 +60,10 @@ export async function loadSettings() {
     if (normalizedLlmFallback !== null) {
       cachedLlmFallback = normalizedLlmFallback;
     }
+    const normalizedLlmPrimary = normalizeLlmPrimary(parsed?.llmPrimaryEnabled);
+    if (normalizedLlmPrimary !== null) {
+      cachedLlmPrimary = normalizedLlmPrimary;
+    }
   } catch (error) {
     if (error.code !== 'ENOENT') {
       /* eslint-disable no-console */
@@ -72,12 +84,20 @@ export function parseLlmFallbackEnabled(value) {
   return normalizeLlmFallback(value);
 }
 
+export function parseLlmPrimaryEnabled(value) {
+  return normalizeLlmPrimary(value);
+}
+
 export function getLlmFallbackEnabled() {
   return cachedLlmFallback;
 }
 
-export async function saveSettings({ strictness, llmFallbackEnabled } = {}) {
-  if (strictness === undefined && llmFallbackEnabled === undefined) {
+export function getLlmPrimaryEnabled() {
+  return cachedLlmPrimary ?? normalizeLlmPrimary(process.env.LLM_PRIMARY_ENABLED) ?? false;
+}
+
+export async function saveSettings({ strictness, llmFallbackEnabled, llmPrimaryEnabled } = {}) {
+  if (strictness === undefined && llmFallbackEnabled === undefined && llmPrimaryEnabled === undefined) {
     const error = new Error('No settings provided.');
     error.code = 'NO_SETTINGS';
     throw error;
@@ -103,10 +123,21 @@ export async function saveSettings({ strictness, llmFallbackEnabled } = {}) {
     cachedLlmFallback = normalized;
   }
 
+  if (llmPrimaryEnabled !== undefined) {
+    const normalized = normalizeLlmPrimary(llmPrimaryEnabled);
+    if (normalized === null) {
+      const error = new Error('Invalid LLM primary value.');
+      error.code = 'INVALID_LLM_PRIMARY';
+      throw error;
+    }
+    cachedLlmPrimary = normalized;
+  }
+
   await persistSettings();
   return {
     strictness: getAnswerStrictness(),
     llmFallbackEnabled: getLlmFallbackEnabled(),
+    llmPrimaryEnabled: getLlmPrimaryEnabled(),
   };
 }
 
@@ -120,6 +151,11 @@ export async function saveLlmFallbackEnabled(value) {
   return llmFallbackEnabled;
 }
 
+export async function saveLlmPrimaryEnabled(value) {
+  const { llmPrimaryEnabled } = await saveSettings({ llmPrimaryEnabled: value });
+  return llmPrimaryEnabled;
+}
+
 export function getRuleMatchingConfig() {
   const strictness = getAnswerStrictness();
   const llmFallbackOverride = getLlmFallbackEnabled();
@@ -131,6 +167,7 @@ export function getRuleMatchingConfig() {
     allowSubstrings: strictness !== 'strict',
     closeMatchThreshold: strictness === 'lenient' ? 0.75 : 0.8,
     allowLLMFallback: strictness !== 'strict',
+    llmPrimaryEnabled: getLlmPrimaryEnabled(),
   };
 
   return {

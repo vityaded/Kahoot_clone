@@ -15,12 +15,15 @@ import {
   getAnswerStrictness,
   getLlmConfigOverrides,
   getLlmFallbackEnabled,
+  getLlmPrimaryEnabled,
   getRuleMatchingConfig,
   loadSettings,
   parseAnswerStrictness,
   parseLlmFallbackEnabled,
+  parseLlmPrimaryEnabled,
   saveAnswerStrictness,
   saveLlmFallbackEnabled,
+  saveLlmPrimaryEnabled,
   saveSettings,
 } from './server/settings.js';
 import {
@@ -58,17 +61,20 @@ app.get('/api/settings/answer-strictness', (_req, res) => {
     llmDefaults: getLlmConfigOverrides(),
     llmFallbackEnabled: getRuleMatchingConfig().allowLLMFallback,
     llmFallbackOverride: getLlmFallbackEnabled(),
+    llmPrimaryEnabled: getLlmPrimaryEnabled(),
   });
 });
 
 app.post('/api/settings/answer-strictness', async (req, res) => {
   const hasStrictness = req.body?.strictness !== undefined;
   const hasLlmFallback = req.body?.llmFallbackEnabled !== undefined;
+  const hasLlmPrimary = req.body?.llmPrimaryEnabled !== undefined;
   const normalizedStrictness = hasStrictness ? parseAnswerStrictness(req.body?.strictness) : null;
   const normalizedLlmFallback = hasLlmFallback ? parseLlmFallbackEnabled(req.body?.llmFallbackEnabled) : null;
+  const normalizedLlmPrimary = hasLlmPrimary ? parseLlmPrimaryEnabled(req.body?.llmPrimaryEnabled) : null;
 
-  if (!hasStrictness && !hasLlmFallback) {
-    res.status(400).json({ error: 'Provide strictness or LLM fallback setting.' });
+  if (!hasStrictness && !hasLlmFallback && !hasLlmPrimary) {
+    res.status(400).json({ error: 'Provide strictness or LLM setting.' });
     return;
   }
 
@@ -82,16 +88,24 @@ app.post('/api/settings/answer-strictness', async (req, res) => {
     return;
   }
 
+  if (hasLlmPrimary && normalizedLlmPrimary === null) {
+    res.status(400).json({ error: 'LLM primary must be true or false.' });
+    return;
+  }
+
   try {
-    if (hasStrictness && hasLlmFallback) {
+    if (hasStrictness && (hasLlmFallback || hasLlmPrimary)) {
       await saveSettings({
         strictness: normalizedStrictness,
-        llmFallbackEnabled: normalizedLlmFallback,
+        llmFallbackEnabled: hasLlmFallback ? normalizedLlmFallback : undefined,
+        llmPrimaryEnabled: hasLlmPrimary ? normalizedLlmPrimary : undefined,
       });
     } else if (hasStrictness) {
       await saveAnswerStrictness(normalizedStrictness);
     } else if (hasLlmFallback) {
       await saveLlmFallbackEnabled(normalizedLlmFallback);
+    } else if (hasLlmPrimary) {
+      await saveLlmPrimaryEnabled(normalizedLlmPrimary);
     }
     res.json({
       strictness: getAnswerStrictness(),
@@ -99,6 +113,7 @@ app.post('/api/settings/answer-strictness', async (req, res) => {
       llmDefaults: getLlmConfigOverrides(),
       llmFallbackEnabled: getRuleMatchingConfig().allowLLMFallback,
       llmFallbackOverride: getLlmFallbackEnabled(),
+      llmPrimaryEnabled: getLlmPrimaryEnabled(),
     });
   } catch (error) {
     /* eslint-disable no-console */
