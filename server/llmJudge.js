@@ -1,6 +1,8 @@
 // llmJudge.js
 // Lightweight LLM-backed answer judge for edge cases (when deterministic rules aren't enough)
 
+import { GoogleGenAI } from '@google/genai';
+
 const OPENAI_API_KEY = (process.env.OPENAI_API_KEY || '').trim();
 const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || '').trim();
 
@@ -8,11 +10,9 @@ const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || '').trim();
 const OPENAI_URL = (process.env.OPENAI_URL || 'https://api.openai.com/v1/chat/completions').trim();
 const OPENAI_MODEL = (process.env.OPENAI_MODEL || 'gpt-4.1-nano').trim();
 
-// Gemini endpoint is v1beta generateContent.
 // Model should be like: gemini-1.5-flash / gemini-2.0-flash / gemma-3-27b-it (as you use)
 const GEMINI_MODEL = (process.env.GEMINI_MODEL || 'gemini-1.5-flash').trim();
-// Keep URL construction close to your Python approach: no extra encoding tricks needed.
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+const GEMINI_CLIENT = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
 
 // Provider priority (matches the Python bot):
 // 1) OpenAI (if key present)
@@ -156,6 +156,15 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_M
   }
 }
 
+function withTimeout(promise, timeoutMs, message) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 async function callOpenAiCompatible(systemPrompt, userPrompt) {
   const body = {
     model: OPENAI_MODEL,
@@ -197,6 +206,10 @@ async function callOpenAiCompatible(systemPrompt, userPrompt) {
 }
 
 async function callGemini(systemPrompt, userPrompt) {
+  if (!GEMINI_CLIENT) {
+    throw new Error('Gemini client not configured (missing GEMINI_API_KEY).');
+  }
+
   // Python-style join: send everything as one "user" message to generateContent.
   const joined = [
     systemPrompt ? `system: ${systemPrompt}` : null,
@@ -208,45 +221,22 @@ async function callGemini(systemPrompt, userPrompt) {
   const minGeminiTimeout = Number(process.env.GEMINI_MIN_TIMEOUT_MS) || 15000;
   const timeoutMs = Math.max(REQUEST_TIMEOUT_MS, minGeminiTimeout);
 
-  const body = {
-    contents: [
-      {
-        role: 'user',
-        parts: [{ text: joined }],
-      },
-    ],
-    // Official field name used by the API.
+  const request = GEMINI_CLIENT.models.generateContent({
+    model: GEMINI_MODEL,
+    contents: joined,
     generationConfig: {
       temperature: 0.3,
     },
-  };
+  });
 
-  const res = await fetchWithTimeout(
-    GEMINI_URL,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    },
-    timeoutMs
-  );
+  const response = await withTimeout(request, timeoutMs, `Gemini request timed out after ${timeoutMs}ms`);
+  const text = response?.text ?? '';
 
-  const json = await res.json().catch(() => ({}));
-
-  if (!res.ok) {
-    const details = JSON.stringify(json).slice(0, 2000);
-    throw new Error(`Gemini HTTP ${res.status}: ${details}`);
+  if (!String(text).trim()) {
+    throw new Error('Gemini returned empty text.');
   }
 
-  const parts = json?.candidates?.[0]?.content?.parts;
-  const text = Array.isArray(parts) ? parts.map(p => p?.text || '').join('') : '';
-
-  if (!text.trim()) {
-    const details = JSON.stringify(json).slice(0, 2000);
-    throw new Error(`Gemini returned empty text: ${details}`);
-  }
-
-  return text.trim();
+  return String(text).trim();
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
