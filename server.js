@@ -14,10 +14,14 @@ import {
 import {
   getAnswerStrictness,
   getLlmConfigOverrides,
+  getLlmFallbackEnabled,
   getRuleMatchingConfig,
   loadSettings,
   parseAnswerStrictness,
+  parseLlmFallbackEnabled,
   saveAnswerStrictness,
+  saveLlmFallbackEnabled,
+  saveSettings,
 } from './server/settings.js';
 import {
   DATA_DIR,
@@ -52,22 +56,49 @@ app.get('/api/settings/answer-strictness', (_req, res) => {
     strictness: getAnswerStrictness(),
     ruleConfig: getRuleMatchingConfig(),
     llmDefaults: getLlmConfigOverrides(),
+    llmFallbackEnabled: getRuleMatchingConfig().allowLLMFallback,
+    llmFallbackOverride: getLlmFallbackEnabled(),
   });
 });
 
 app.post('/api/settings/answer-strictness', async (req, res) => {
-  const normalized = parseAnswerStrictness(req.body?.strictness);
-  if (!normalized) {
+  const hasStrictness = req.body?.strictness !== undefined;
+  const hasLlmFallback = req.body?.llmFallbackEnabled !== undefined;
+  const normalizedStrictness = hasStrictness ? parseAnswerStrictness(req.body?.strictness) : null;
+  const normalizedLlmFallback = hasLlmFallback ? parseLlmFallbackEnabled(req.body?.llmFallbackEnabled) : null;
+
+  if (!hasStrictness && !hasLlmFallback) {
+    res.status(400).json({ error: 'Provide strictness or LLM fallback setting.' });
+    return;
+  }
+
+  if (hasStrictness && !normalizedStrictness) {
     res.status(400).json({ error: 'Strictness must be strict, normal, or lenient.' });
     return;
   }
 
+  if (hasLlmFallback && normalizedLlmFallback === null) {
+    res.status(400).json({ error: 'LLM fallback must be true or false.' });
+    return;
+  }
+
   try {
-    await saveAnswerStrictness(normalized);
+    if (hasStrictness && hasLlmFallback) {
+      await saveSettings({
+        strictness: normalizedStrictness,
+        llmFallbackEnabled: normalizedLlmFallback,
+      });
+    } else if (hasStrictness) {
+      await saveAnswerStrictness(normalizedStrictness);
+    } else if (hasLlmFallback) {
+      await saveLlmFallbackEnabled(normalizedLlmFallback);
+    }
     res.json({
       strictness: getAnswerStrictness(),
       ruleConfig: getRuleMatchingConfig(),
       llmDefaults: getLlmConfigOverrides(),
+      llmFallbackEnabled: getRuleMatchingConfig().allowLLMFallback,
+      llmFallbackOverride: getLlmFallbackEnabled(),
     });
   } catch (error) {
     /* eslint-disable no-console */

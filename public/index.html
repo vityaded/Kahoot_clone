@@ -58,6 +58,14 @@
           </select>
           <button type="button" class="button" id="save-strictness">Update</button>
         </div>
+        <label class="strictness-toggle">
+          <span class="eyebrow">LLM fallback</span>
+          <span class="toggle-control">
+            <input type="checkbox" id="llm-fallback-toggle" disabled />
+            <span class="toggle-slider" aria-hidden="true"></span>
+            <span>Enable LLM fallback</span>
+          </span>
+        </label>
         <p class="muted" id="strictness-status" aria-live="polite"></p>
       </div>
       <p class="muted" id="strictness-rules"></p>
@@ -121,8 +129,10 @@
     const strictnessSelect = document.getElementById('strictness-select');
     const strictnessSave = document.getElementById('save-strictness');
     const strictnessStatus = document.getElementById('strictness-status');
+    const llmFallbackToggle = document.getElementById('llm-fallback-toggle');
     let isImporting = false;
     let lastStrictness = 'normal';
+    let lastLlmFallback = null;
 
     function formatDate(timestamp) {
       const date = new Date(timestamp);
@@ -224,12 +234,19 @@
     function renderStrictnessDetails(payload) {
       const strictness = payload?.strictness || 'normal';
       const copy = strictnessCopy[strictness] || strictnessCopy.normal;
-      strictnessSummary.textContent = copy.summary;
-      strictnessModalSummary.textContent = copy.summary;
+      const ruleConfig = payload?.ruleConfig || {};
+      const llmDefaults = payload?.llmDefaults || {};
+      const llmFallbackEnabled = payload?.llmFallbackEnabled ?? ruleConfig.allowLLMFallback ?? false;
+      const summarySuffix = llmFallbackEnabled ? '' : ' LLM fallback is disabled.';
+      strictnessSummary.textContent = `${copy.summary}${summarySuffix}`;
+      strictnessModalSummary.textContent = `${copy.summary}${summarySuffix}`;
       strictnessPill.textContent = copy.title;
       lastStrictness = strictness;
       strictnessSelect.value = strictness;
       strictnessSave.disabled = true;
+      lastLlmFallback = llmFallbackEnabled;
+      llmFallbackToggle.checked = llmFallbackEnabled;
+      llmFallbackToggle.disabled = false;
 
       strictnessOk.innerHTML = '';
       copy.ok.forEach((item) => {
@@ -245,8 +262,6 @@
         strictnessPartial.appendChild(li);
       });
 
-      const ruleConfig = payload?.ruleConfig || {};
-      const llmDefaults = payload?.llmDefaults || {};
       const closeMatch = ruleConfig.allowCloseMatch
         ? `Close-match threshold: ${(ruleConfig.closeMatchThreshold ?? 0.8).toFixed(2)}`
         : 'Close-match disabled';
@@ -258,7 +273,7 @@
       if (ruleConfig.allowLLMFallback) {
         strictnessLlm.textContent = `LLM fallback: enabled (${llmDefaults.mode} mode, confidence ≥ ${(llmDefaults.confidenceThreshold ?? 0.8).toFixed(2)})`;
       } else {
-        strictnessLlm.textContent = 'LLM fallback: disabled (strict mode)';
+        strictnessLlm.textContent = 'LLM fallback: disabled';
       }
     }
 
@@ -364,6 +379,30 @@
       } catch (error) {
         setStrictnessStatus(error.message || 'Unable to update strictness right now.', true);
         strictnessSave.disabled = strictnessSelect.value === lastStrictness;
+      }
+    });
+
+    llmFallbackToggle.addEventListener('change', async () => {
+      const enabled = llmFallbackToggle.checked;
+      llmFallbackToggle.disabled = true;
+      setStrictnessStatus('Saving LLM fallback preference…');
+      try {
+        const response = await fetch('/api/settings/answer-strictness', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ llmFallbackEnabled: enabled }),
+        });
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          throw new Error(data?.error || 'Unable to update LLM fallback.');
+        }
+        const payload = await response.json();
+        renderStrictnessDetails(payload);
+        setStrictnessStatus('Saved. LLM fallback updated.');
+      } catch (error) {
+        llmFallbackToggle.checked = lastLlmFallback ?? false;
+        llmFallbackToggle.disabled = false;
+        setStrictnessStatus(error.message || 'Unable to update LLM fallback right now.', true);
       }
     });
 
