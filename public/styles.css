@@ -347,6 +347,37 @@ a.button {
   backdrop-filter: blur(4px);
 }
 
+.strictness-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.strictness-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(124, 240, 255, 0.2);
+  border: 1px solid rgba(124, 240, 255, 0.4);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.criteria-list {
+  margin: 8px 0 16px;
+  padding-left: 18px;
+  color: var(--text);
+}
+
+.criteria-list li {
+  margin-bottom: 6px;
+}
+
 label {
   display: block;
   margin-bottom: 10px;
