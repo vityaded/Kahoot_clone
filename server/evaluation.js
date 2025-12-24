@@ -1,7 +1,41 @@
+import {
+  getLlmConfidenceThreshold,
+  isLlmJudgeConfigured,
+  judgeAnswerWithLlm,
+} from './llmJudge.js';
+
 const synonymCache = new Map();
 
 export function normalise(text = '') {
   return String(text ?? '').trim().toLowerCase();
+}
+
+// Normalization intended specifically for answer comparison.
+// - lowercases
+// - removes most punctuation/symbols
+// - collapses whitespace
+// - removes diacritics (café -> cafe)
+// This makes acceptance resilient to capitalization and punctuation differences.
+export function normaliseAnswer(text = '') {
+  const raw = String(text ?? '');
+  // Normalize unicode (diacritics) and common punctuation variants.
+  const unicodeNormalized = raw
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '') // strip combining marks
+    // Treat apostrophes as optional (don't == dont).
+    .replace(/[’‘‛´`']/g, '')
+    .replace(/[“”„«»]/g, '"')
+    .replace(/[–—−]/g, '-');
+
+  // Remove punctuation/symbols but keep letters/digits/spaces.
+  // \p{L}=letters, \p{N}=numbers (unicode).
+  const withoutPunct = unicodeNormalized
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ');
+
+  return withoutPunct
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function levenshtein(a, b) {
@@ -46,8 +80,14 @@ export function isCloseMatch(submitted, expected) {
 }
 
 export async function fetchSynonyms(word) {
-  const normalized = normalise(word);
+  const normalized = normaliseAnswer(word);
   if (!normalized) return [];
+  // Only look up synonyms for single tokens; the public dictionary endpoint
+  // is unreliable for phrases.
+  if (normalized.includes(' ')) {
+    synonymCache.set(normalized, []);
+    return [];
+  }
   if (synonymCache.has(normalized)) return synonymCache.get(normalized);
 
   try {
@@ -61,9 +101,9 @@ export async function fetchSynonyms(word) {
     const synonyms = new Set();
     payload?.forEach((entry) => {
       entry?.meanings?.forEach((meaning) => {
-        meaning?.synonyms?.forEach((syn) => synonyms.add(normalise(syn)));
+        meaning?.synonyms?.forEach((syn) => synonyms.add(normaliseAnswer(syn)));
         meaning?.definitions?.forEach((definition) => {
-          definition?.synonyms?.forEach((syn) => synonyms.add(normalise(syn)));
+          definition?.synonyms?.forEach((syn) => synonyms.add(normaliseAnswer(syn)));
         });
       });
     });
@@ -99,19 +139,45 @@ export async function evaluateAnswer(question, submission, options = {}) {
     includeSpeedBonus = true,
   } = options;
 
-  const expectedAnswers = [question.answer, ...(question.alternateAnswers || [])];
-  const normalizedSubmitted = normalise(submission ?? '');
-  const normalizedExpected = expectedAnswers.map(normalise);
-  const normalizedPartial = (question.partialAnswers || []).map(normalise);
+  const expectedAnswers = [question.answer, ...(question.alternateAnswers || [])].filter(Boolean);
+  const normalizedSubmitted = normaliseAnswer(submission ?? '');
+  const normalizedExpected = expectedAnswers.map(normaliseAnswer);
+  const normalizedPartial = (question.partialAnswers || []).map(normaliseAnswer);
   const normalizedSynonyms = await collectSynonyms(expectedAnswers);
 
-  const isCorrect = normalizedExpected.some((expected) => normalizedSubmitted === expected);
-  const isPartial =
+  // Space-insensitive variants help accept answers with different hyphenation/
+  // punctuation spacing (e.g., "e-mail" vs "email", "well-known" vs "well known").
+  const compactSubmitted = normalizedSubmitted.replace(/\s+/g, '');
+  const compactExpected = normalizedExpected.map((e) => e.replace(/\s+/g, ''));
+
+  let isCorrect =
+    normalizedExpected.some((expected) => normalizedSubmitted === expected) ||
+    (compactSubmitted && compactExpected.some((e) => e === compactSubmitted));
+  let isPartial =
     !isCorrect &&
     (normalizedPartial.includes(normalizedSubmitted) ||
       normalizedSynonyms.includes(normalizedSubmitted) ||
       normalizedSynonyms.some((syn) => isCloseMatch(normalizedSubmitted, syn)) ||
       normalizedExpected.some((expected) => isCloseMatch(normalizedSubmitted, expected)));
+
+  // LLM fallback for edge cases (e.g., close paraphrases, punctuation-heavy answers).
+  // Only runs when rule-based matching fails.
+  let judgedBy = 'rules';
+  if (!isCorrect && !isPartial && isLlmJudgeConfigured() && normalizedSubmitted) {
+    const llmResult = await judgeAnswerWithLlm({
+      questionPrompt: question?.prompt || '',
+      expectedAnswers,
+      submission: String(submission ?? ''),
+    });
+    const threshold = getLlmConfidenceThreshold();
+    if (llmResult?.verdict === 'CORRECT' && (llmResult.confidence ?? 0) >= threshold) {
+      isCorrect = true;
+      judgedBy = 'llm';
+    } else if (llmResult?.verdict === 'PARTIAL' && (llmResult.confidence ?? 0) >= threshold) {
+      isPartial = true;
+      judgedBy = 'llm';
+    }
+  }
 
   const speedBonus = calculateSpeedBonus(durationMs, timeRemainingMs, includeSpeedBonus);
   const baseScore = 1000 + speedBonus;
@@ -123,6 +189,7 @@ export async function evaluateAnswer(question, submission, options = {}) {
     earned,
     correctAnswer: question.answer,
     playerAnswer: submission ?? '',
+    judgedBy,
   };
 }
 
