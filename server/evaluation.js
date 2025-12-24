@@ -141,6 +141,7 @@ export async function evaluateAnswer(question, submission, options = {}) {
     durationMs = null,
     timeRemainingMs = null,
     includeSpeedBonus = true,
+    debug = false,
   } = options;
 
   const expectedAnswers = [question.answer, ...(question.alternateAnswers || [])].filter(Boolean);
@@ -149,54 +150,84 @@ export async function evaluateAnswer(question, submission, options = {}) {
   const normalizedPartial = (question.partialAnswers || []).map(normaliseAnswer);
   const cfg = getRuleMatchingConfig();
   let llmAlreadyTried = false;
+  const evaluationLog = [];
+
+  const log = (message, details = null) => {
+    if (!debug) return;
+    evaluationLog.push(details ? { message, details } : { message });
+  };
 
   let isCorrect = false;
   let isPartial = false;
   let judgedBy = 'rules';
 
+  log('Normalized inputs', {
+    submitted: normalizedSubmitted,
+    expected: normalizedExpected,
+    partial: normalizedPartial,
+  });
+  log('Rule config', cfg);
+
   if (cfg.llmPrimaryEnabled && isLlmJudgeConfigured() && normalizedSubmitted) {
     llmAlreadyTried = true;
+    log('LLM primary enabled, sending to LLM judge.');
     const llmResult = await judgeAnswerWithLlm({
       questionPrompt: question?.prompt || '',
       expectedAnswers,
       submission: String(submission ?? ''),
     });
+    log('LLM primary response', llmResult);
     const threshold = getLlmConfidenceThreshold();
     if (llmResult?.verdict === 'CORRECT' && (llmResult.confidence ?? 0) >= threshold) {
       isCorrect = true;
       judgedBy = 'llm';
+      log('LLM primary verdict accepted as correct.');
     } else if (llmResult?.verdict === 'PARTIAL' && (llmResult.confidence ?? 0) >= threshold) {
       isPartial = true;
       judgedBy = 'llm';
+      log('LLM primary verdict accepted as partial.');
     }
   }
 
   if (!isCorrect && !isPartial) {
     const normalizedSynonyms = cfg.allowSynonyms ? await collectSynonyms(expectedAnswers) : [];
+    if (cfg.allowSynonyms) {
+      log('Synonym lookup results', normalizedSynonyms);
+    }
 
     // Space-insensitive variants help accept answers with different hyphenation/
     // punctuation spacing (e.g., "e-mail" vs "email", "well-known" vs "well known").
     const compactSubmitted = normalizedSubmitted.replace(/\s+/g, '');
     const compactExpected = normalizedExpected.map((e) => e.replace(/\s+/g, ''));
+    log('Compact match values', { compactSubmitted, compactExpected });
 
     isCorrect =
       normalizedExpected.some((expected) => normalizedSubmitted === expected) ||
       (cfg.allowCompactMatch && compactSubmitted && compactExpected.some((e) => e === compactSubmitted));
 
     if (!isCorrect) {
+      log('Exact/compact match failed.');
       if (normalizedPartial.includes(normalizedSubmitted)) {
         isPartial = true;
+        log('Matched partial answer list.');
       } else {
-        if (cfg.allowSynonyms && normalizedSynonyms.includes(normalizedSubmitted)) isPartial = true;
+        if (cfg.allowSynonyms && normalizedSynonyms.includes(normalizedSubmitted)) {
+          isPartial = true;
+          log('Matched synonym list.');
+        }
 
         if (!isPartial && cfg.allowCloseMatch) {
           if (cfg.allowSynonyms && normalizedSynonyms.some((syn) => isCloseMatch(normalizedSubmitted, syn, cfg))) {
             isPartial = true;
+            log('Matched close synonym.');
           } else if (normalizedExpected.some((expected) => isCloseMatch(normalizedSubmitted, expected, cfg))) {
             isPartial = true;
+            log('Matched close expected answer.');
           }
         }
       }
+    } else {
+      log('Exact/compact match succeeded.');
     }
   }
 
@@ -204,26 +235,31 @@ export async function evaluateAnswer(question, submission, options = {}) {
   // Only runs when rule-based matching fails.
   if (!isCorrect && !isPartial && cfg.allowLLMFallback && !llmAlreadyTried && isLlmJudgeConfigured() && normalizedSubmitted) {
     llmAlreadyTried = true;
+    log('LLM fallback enabled, sending to LLM judge.');
     const llmResult = await judgeAnswerWithLlm({
       questionPrompt: question?.prompt || '',
       expectedAnswers,
       submission: String(submission ?? ''),
     });
+    log('LLM fallback response', llmResult);
     const threshold = getLlmConfidenceThreshold();
     if (llmResult?.verdict === 'CORRECT' && (llmResult.confidence ?? 0) >= threshold) {
       isCorrect = true;
       judgedBy = 'llm';
+      log('LLM fallback verdict accepted as correct.');
     } else if (llmResult?.verdict === 'PARTIAL' && (llmResult.confidence ?? 0) >= threshold) {
       isPartial = true;
       judgedBy = 'llm';
+      log('LLM fallback verdict accepted as partial.');
     }
   }
 
   const speedBonus = calculateSpeedBonus(durationMs, timeRemainingMs, includeSpeedBonus);
   const baseScore = 1000 + speedBonus;
   const earned = isCorrect ? baseScore : isPartial ? Math.round(baseScore / 2) : 0;
+  log('Score calculation', { baseScore, speedBonus, earned });
 
-  return {
+  const result = {
     isCorrect,
     isPartial,
     earned,
@@ -231,6 +267,10 @@ export async function evaluateAnswer(question, submission, options = {}) {
     playerAnswer: submission ?? '',
     judgedBy,
   };
+  if (debug) {
+    result.evaluationLog = evaluationLog;
+  }
+  return result;
 }
 
 export async function scoreSubmission(questions = [], submissions = [], options = {}) {

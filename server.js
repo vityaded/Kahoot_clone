@@ -9,6 +9,7 @@ import multer from 'multer';
 import {
   evaluateAnswer,
   normalise,
+  normaliseAnswer,
   scoreSubmission,
 } from './server/evaluation.js';
 import {
@@ -36,6 +37,7 @@ import {
   ensureMediaDir,
 } from './server/storage.js';
 import { importApkgFromPath } from './server/importApkg.js';
+import { fileURLToPath } from 'url';
 
 const app = express();
 const server = http.createServer(app);
@@ -45,6 +47,7 @@ const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 const QUIZ_ROOM_PREFIX = 'quiz-';
 const DISCONNECT_PRUNE_MS = 45 * 60 * 1000;
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const quizTemplates = new Map();
 const sessions = new Map();
@@ -119,6 +122,44 @@ app.post('/api/settings/answer-strictness', async (req, res) => {
     /* eslint-disable no-console */
     console.error('Failed to save strictness settings', error);
     res.status(500).json({ error: 'Unable to save strictness settings right now.' });
+  }
+});
+
+app.post('/api/test-evaluate', async (req, res) => {
+  const prompt = String(req.body?.prompt ?? '').trim();
+  const answer = String(req.body?.answer ?? '').trim();
+  const submission = String(req.body?.submission ?? '').trim();
+  const alternateAnswers = Array.isArray(req.body?.alternateAnswers) ? req.body.alternateAnswers : [];
+  const partialAnswers = Array.isArray(req.body?.partialAnswers) ? req.body.partialAnswers : [];
+
+  if (!answer || !submission) {
+    res.status(400).json({ error: 'Answer and submission are required.' });
+    return;
+  }
+
+  try {
+    const question = {
+      prompt,
+      answer,
+      alternateAnswers: alternateAnswers.map((entry) => String(entry ?? '').trim()).filter(Boolean),
+      partialAnswers: partialAnswers.map((entry) => String(entry ?? '').trim()).filter(Boolean),
+    };
+    const evaluation = await evaluateAnswer(question, submission, { includeSpeedBonus: false, debug: true });
+
+    res.json({
+      evaluation,
+      question,
+      normalized: {
+        submitted: normaliseAnswer(submission),
+        expected: [question.answer, ...question.alternateAnswers].map(normaliseAnswer),
+        partial: question.partialAnswers.map(normaliseAnswer),
+      },
+      ruleConfig: getRuleMatchingConfig(),
+    });
+  } catch (error) {
+    /* eslint-disable no-console */
+    console.error('Failed to evaluate test answer', error);
+    res.status(500).json({ error: 'Unable to evaluate answer right now.' });
   }
 });
 
@@ -1166,6 +1207,10 @@ app.use('/media', express.static(MEDIA_DIR));
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });
+});
+
+app.get('/test', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'test.html'));
 });
 
 app.get('/api/quizzes/:quizId', (req, res) => {
