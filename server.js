@@ -560,20 +560,25 @@ await loadPersistedHomeworkSessions();
 
 io.on('connection', (socket) => {
   socket.on('host:createQuiz', ({ title, questions, questionDuration }) => {
-    if (!Array.isArray(questions) || questions.length === 0) {
-      socket.emit('host:error', 'Please add at least one question.');
-      return;
-    }
-    const template = createQuizTemplate({ title, questions, questionDuration });
-    if (!template) {
-      socket.emit('host:error', 'Questions need both prompts and answers.');
-      return;
-    }
+    try {
+      if (!Array.isArray(questions) || questions.length === 0) {
+        socket.emit('host:error', 'Please add at least one question.');
+        return;
+      }
+      const template = createQuizTemplate({ title, questions, questionDuration });
+      if (!template) {
+        socket.emit('host:error', 'Questions need both prompts and answers.');
+        return;
+      }
 
-    const session = createSessionFromTemplate(template);
+      const session = createSessionFromTemplate(template);
 
-    socket.join(`${QUIZ_ROOM_PREFIX}${session.id}`);
-    socket.emit('host:quizCreated', { quizId: session.id, templateId });
+      socket.join(`${QUIZ_ROOM_PREFIX}${session.id}`);
+      socket.emit('host:quizCreated', { quizId: session.id, templateId: template.id });
+    } catch (err) {
+      console.error('host:createQuiz failed', err);
+      socket.emit('host:error', 'Failed to create quiz due to a server error.');
+    }
   });
 
   socket.on('host:claimHost', ({ quizId }) => {
