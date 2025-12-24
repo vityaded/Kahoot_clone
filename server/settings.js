@@ -2,6 +2,7 @@ import { promises as fs } from 'fs';
 import { SETTINGS_FILE, ensureDataDir } from './storage.js';
 
 let cachedStrictness = null;
+let cachedLlmFallback = null;
 
 function normalizeStrictness(value) {
   if (value === undefined || value === null) return null;
@@ -14,6 +15,31 @@ function normalizeStrictness(value) {
   return null;
 }
 
+function normalizeLlmFallback(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value === 'boolean') return value;
+  const raw = String(value).trim().toLowerCase();
+  if (!raw) return null;
+  if (['true', '1', 'yes', 'on'].includes(raw)) return true;
+  if (['false', '0', 'no', 'off'].includes(raw)) return false;
+  return null;
+}
+
+function buildSettingsPayload() {
+  const payload = {
+    strictness: getAnswerStrictness(),
+  };
+  if (cachedLlmFallback !== null) {
+    payload.llmFallbackEnabled = cachedLlmFallback;
+  }
+  return payload;
+}
+
+async function persistSettings() {
+  await ensureDataDir();
+  await fs.writeFile(SETTINGS_FILE, JSON.stringify(buildSettingsPayload(), null, 2), 'utf8');
+}
+
 export async function loadSettings() {
   try {
     const file = await fs.readFile(SETTINGS_FILE, 'utf8');
@@ -21,6 +47,10 @@ export async function loadSettings() {
     const normalized = normalizeStrictness(parsed?.strictness);
     if (normalized) {
       cachedStrictness = normalized;
+    }
+    const normalizedLlmFallback = normalizeLlmFallback(parsed?.llmFallbackEnabled);
+    if (normalizedLlmFallback !== null) {
+      cachedLlmFallback = normalizedLlmFallback;
     }
   } catch (error) {
     if (error.code !== 'ENOENT') {
@@ -38,51 +68,74 @@ export function parseAnswerStrictness(value) {
   return normalizeStrictness(value);
 }
 
-export async function saveAnswerStrictness(value) {
-  const normalized = normalizeStrictness(value);
-  if (!normalized) {
-    const error = new Error('Invalid strictness value.');
-    error.code = 'INVALID_STRICTNESS';
+export function parseLlmFallbackEnabled(value) {
+  return normalizeLlmFallback(value);
+}
+
+export function getLlmFallbackEnabled() {
+  return cachedLlmFallback;
+}
+
+export async function saveSettings({ strictness, llmFallbackEnabled } = {}) {
+  if (strictness === undefined && llmFallbackEnabled === undefined) {
+    const error = new Error('No settings provided.');
+    error.code = 'NO_SETTINGS';
     throw error;
   }
-  cachedStrictness = normalized;
-  await ensureDataDir();
-  await fs.writeFile(SETTINGS_FILE, JSON.stringify({ strictness: normalized }, null, 2), 'utf8');
-  return normalized;
+
+  if (strictness !== undefined) {
+    const normalized = normalizeStrictness(strictness);
+    if (!normalized) {
+      const error = new Error('Invalid strictness value.');
+      error.code = 'INVALID_STRICTNESS';
+      throw error;
+    }
+    cachedStrictness = normalized;
+  }
+
+  if (llmFallbackEnabled !== undefined) {
+    const normalized = normalizeLlmFallback(llmFallbackEnabled);
+    if (normalized === null) {
+      const error = new Error('Invalid LLM fallback value.');
+      error.code = 'INVALID_LLM_FALLBACK';
+      throw error;
+    }
+    cachedLlmFallback = normalized;
+  }
+
+  await persistSettings();
+  return {
+    strictness: getAnswerStrictness(),
+    llmFallbackEnabled: getLlmFallbackEnabled(),
+  };
+}
+
+export async function saveAnswerStrictness(value) {
+  const { strictness } = await saveSettings({ strictness: value });
+  return strictness;
+}
+
+export async function saveLlmFallbackEnabled(value) {
+  const { llmFallbackEnabled } = await saveSettings({ llmFallbackEnabled: value });
+  return llmFallbackEnabled;
 }
 
 export function getRuleMatchingConfig() {
   const strictness = getAnswerStrictness();
+  const llmFallbackOverride = getLlmFallbackEnabled();
 
-  if (strictness === 'strict') {
-    return {
-      allowCompactMatch: true,
-      allowCloseMatch: false,
-      allowSynonyms: false,
-      allowSubstrings: false,
-      closeMatchThreshold: 0.8,
-      allowLLMFallback: false,
-    };
-  }
-
-  if (strictness === 'lenient') {
-    return {
-      allowCompactMatch: true,
-      allowCloseMatch: true,
-      allowSynonyms: true,
-      allowSubstrings: true,
-      closeMatchThreshold: 0.75,
-      allowLLMFallback: true,
-    };
-  }
+  const baseConfig = {
+    allowCompactMatch: true,
+    allowCloseMatch: strictness !== 'strict',
+    allowSynonyms: strictness !== 'strict',
+    allowSubstrings: strictness !== 'strict',
+    closeMatchThreshold: strictness === 'lenient' ? 0.75 : 0.8,
+    allowLLMFallback: strictness !== 'strict',
+  };
 
   return {
-    allowCompactMatch: true,
-    allowCloseMatch: true,
-    allowSynonyms: true,
-    allowSubstrings: true,
-    closeMatchThreshold: 0.8,
-    allowLLMFallback: true,
+    ...baseConfig,
+    allowLLMFallback: llmFallbackOverride ?? baseConfig.allowLLMFallback,
   };
 }
 
