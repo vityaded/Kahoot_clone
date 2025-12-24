@@ -1,4 +1,4 @@
-// llmJudge.js
+// server/llmJudge.js
 // Lightweight LLM-backed answer judge for edge cases.
 // The primary evaluation remains rule-based; the LLM is only consulted
 // when the rule-based checks fail.
@@ -8,28 +8,23 @@ import { getLlmConfigOverrides } from './settings.js';
 const OPENAI_API_KEY = (process.env.OPENAI_API_KEY || '').trim();
 const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || '').trim();
 
-// Provider priority:
-// 1) Gemini (if key present)
-// 2) OpenAI (if key present)
+// Provider priority (matches your .env comment: "OpenAI preferred if set")
 const PROVIDERS = [];
-if (GEMINI_API_KEY) PROVIDERS.push('gemini');
 if (OPENAI_API_KEY) PROVIDERS.push('openai');
+if (GEMINI_API_KEY) PROVIDERS.push('gemini');
 
 const OPENAI_MODEL = (process.env.OPENAI_MODEL || 'gpt-4.1-nano').trim();
+const OPENAI_URL = (process.env.OPENAI_URL || 'https://api.openai.com/v1/chat/completions').trim();
 
-// IMPORTANT: users often set GEMINI_MODEL as "models/<name>".
-// If you keep that prefix and also URL-encode, the endpoint becomes invalid.
+// Gemini model (strip "models/" prefix if user set it)
 const GEMINI_MODEL_RAW = (process.env.GEMINI_MODEL || 'gemma-3-27b-it').trim();
 const GEMINI_MODEL = GEMINI_MODEL_RAW.replace(/^models\//, '').trim();
 
-const OPENAI_URL = (process.env.OPENAI_URL || 'https://api.openai.com/v1/chat/completions').trim();
-
-// Build Gemini endpoint correctly (no double "models/" and no encoded slash)
+// Build Gemini endpoint (v1beta generateContent)
 const GEMINI_URL =
   `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent` +
   `?key=${encodeURIComponent(GEMINI_API_KEY)}`;
 
-// Your old default (1800ms) is too small; Gemini often needs more.
 const REQUEST_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS) || 15000;
 
 const defaults = getLlmConfigOverrides();
@@ -53,7 +48,6 @@ export function getLlmConfidenceThreshold() {
 
 function pruneCacheIfNeeded() {
   if (cache.size <= MAX_CACHE) return;
-  // Drop oldest ~10% (Map preserves insertion order).
   const dropCount = Math.ceil(MAX_CACHE * 0.1);
   let dropped = 0;
   for (const key of cache.keys()) {
@@ -102,14 +96,10 @@ function extractJsonObject(text) {
   const raw = String(text || '').trim();
   if (!raw) return null;
 
-  // Try direct parse first.
   try {
     return JSON.parse(raw);
-  } catch (_) {
-    // fallthrough
-  }
+  } catch (_) {}
 
-  // Try to find the first JSON object in the text.
   const match = raw.match(/\{[\s\S]*\}/);
   if (!match) return null;
 
@@ -160,29 +150,30 @@ async function callOpenAiCompatible({ url, apiKey, model, systemPrompt, userProm
 
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
-    throw new Error(`OpenAI request failed (${res.status}): ${errText.slice(0, 500)}`);
+    throw new Error(`OpenAI request failed (${res.status}): ${errText.slice(0, 800)}`);
   }
 
   const json = await res.json();
   const content = json?.choices?.[0]?.message?.content ?? '';
   const text = String(content).trim();
-
   if (!text) throw new Error('OpenAI returned empty content');
   return text;
 }
 
-async function callGemini({ url, systemPrompt, userPrompt }) {
-  // Use the “single user message” style (like your working Python code),
-  // because it’s the most compatible across Gemini models.
-  const joined = `SYSTEM:\n${systemPrompt}\n\nUSER:\n${userPrompt}`;
+/**
+ * GEMINI CALL — Python-style approach:
+ * - join system + user into ONE text blob
+ * - send as a single "user" message in contents[]
+ * - do NOT use responseMimeType (it breaks some models)
+ */
+async function callGeminiPythonStyle({ url, systemPrompt, userPrompt }) {
+  const joined = `system: ${systemPrompt}\nuser: ${userPrompt}`;
 
   const body = {
     contents: [{ role: 'user', parts: [{ text: joined }] }],
     generationConfig: {
-      temperature: 0,
+      temperature: 0.3,
       maxOutputTokens: 220,
-      // Strongly nudges Gemini to output strict JSON.
-      responseMimeType: 'application/json',
     },
   };
 
@@ -194,12 +185,11 @@ async function callGemini({ url, systemPrompt, userPrompt }) {
 
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
-    throw new Error(`Gemini request failed (${res.status}): ${errText.slice(0, 500)}`);
+    throw new Error(`Gemini request failed (${res.status}): ${errText.slice(0, 800)}`);
   }
 
   const json = await res.json();
 
-  // Typical Gemini response: candidates[0].content.parts[].text
   const text =
     json?.candidates?.[0]?.content?.parts
       ?.map((p) => p?.text)
@@ -207,10 +197,7 @@ async function callGemini({ url, systemPrompt, userPrompt }) {
       .join('\n') ?? '';
 
   const out = String(text).trim();
-
-  // If Gemini returns OK but no candidates/text (blocked/empty), treat as failure so fallback works.
   if (!out) throw new Error('Gemini returned no candidate text');
-
   return out;
 }
 
@@ -241,14 +228,20 @@ export async function runLlmChat({ prompt, systemPrompt }) {
   for (const provider of PROVIDERS) {
     try {
       log.push({ message: `Calling ${provider} provider.` });
+
       if (provider === 'gemini') {
-        const response = await callGemini({ url: GEMINI_URL, systemPrompt: systemText, userPrompt });
+        const response = await callGeminiPythonStyle({
+          url: GEMINI_URL,
+          systemPrompt: systemText,
+          userPrompt,
+        });
         log.push({
           message: 'Gemini response received.',
           details: { provider, model: GEMINI_MODEL, response },
         });
         return { provider, model: GEMINI_MODEL, response, log };
       }
+
       if (provider === 'openai') {
         const response = await callOpenAiCompatible({
           url: OPENAI_URL,
@@ -297,7 +290,7 @@ export async function judgeAnswerWithLlm({ questionPrompt, expectedAnswers, subm
     for (const provider of PROVIDERS) {
       try {
         if (provider === 'gemini') {
-          rawText = await callGemini({ url: GEMINI_URL, systemPrompt, userPrompt });
+          rawText = await callGeminiPythonStyle({ url: GEMINI_URL, systemPrompt, userPrompt });
         } else if (provider === 'openai') {
           rawText = await callOpenAiCompatible({
             url: OPENAI_URL,
@@ -333,7 +326,6 @@ export async function judgeAnswerWithLlm({ questionPrompt, expectedAnswers, subm
     pruneCacheIfNeeded();
     return result;
   } catch (_) {
-    // Fail closed: if LLM is down or returns garbage, do not change grading.
     cache.set(key, null);
     pruneCacheIfNeeded();
     return null;
