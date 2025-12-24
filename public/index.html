@@ -37,6 +37,9 @@
           <h2>Answer grading strictness</h2>
           <p class="muted" id="strictness-summary">Loading strictness settings…</p>
         </div>
+        <div class="cta-row">
+          <button type="button" class="button ghost" id="open-strictness-modal">View details</button>
+        </div>
       </div>
       <div class="strictness-row">
         <div>
@@ -45,14 +48,27 @@
         </div>
         <div class="muted" id="strictness-llm">LLM fallback: —</div>
       </div>
-      <div class="strictness-details">
-        <h3>Acceptance criteria for OK</h3>
-        <ul id="strictness-ok" class="criteria-list"></ul>
-        <h3>Partial credit behavior</h3>
-        <ul id="strictness-partial" class="criteria-list"></ul>
-      </div>
       <p class="muted" id="strictness-rules"></p>
     </section>
+
+    <div class="modal-overlay hidden" id="strictness-modal" role="dialog" aria-modal="true" aria-labelledby="strictness-modal-title">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">Answer grading</p>
+            <h2 id="strictness-modal-title">Answer grading strictness details</h2>
+          </div>
+          <button type="button" class="button ghost" id="close-strictness-modal">Close</button>
+        </div>
+        <div class="strictness-details">
+          <h3>Acceptance criteria for OK</h3>
+          <ul id="strictness-ok" class="criteria-list"></ul>
+          <h3>Partial credit behavior</h3>
+          <ul id="strictness-partial" class="criteria-list"></ul>
+        </div>
+        <p class="muted" id="strictness-modal-summary"></p>
+      </div>
+    </div>
 
     <section class="card">
       <div class="card-heading">
@@ -86,6 +102,10 @@
     const strictnessPartial = document.getElementById('strictness-partial');
     const strictnessLlm = document.getElementById('strictness-llm');
     const strictnessRules = document.getElementById('strictness-rules');
+    const strictnessModalSummary = document.getElementById('strictness-modal-summary');
+    const openStrictnessModal = document.getElementById('open-strictness-modal');
+    const closeStrictnessModal = document.getElementById('close-strictness-modal');
+    const strictnessModal = document.getElementById('strictness-modal');
     let isImporting = false;
 
     function formatDate(timestamp) {
@@ -189,6 +209,7 @@
       const strictness = payload?.strictness || 'normal';
       const copy = strictnessCopy[strictness] || strictnessCopy.normal;
       strictnessSummary.textContent = copy.summary;
+      strictnessModalSummary.textContent = copy.summary;
       strictnessPill.textContent = copy.title;
 
       strictnessOk.innerHTML = '';
@@ -293,6 +314,25 @@
       .catch(() => {
         strictnessSummary.textContent = 'Unable to load strictness settings right now.';
       });
+
+    function toggleStrictnessModal(show) {
+      if (show) {
+        strictnessModal.classList.remove('hidden');
+      } else {
+        strictnessModal.classList.add('hidden');
+      }
+    }
+
+    openStrictnessModal.addEventListener('click', () => toggleStrictnessModal(true));
+    closeStrictnessModal.addEventListener('click', () => toggleStrictnessModal(false));
+    strictnessModal.addEventListener('click', (event) => {
+      if (event.target === strictnessModal) {
+        toggleStrictnessModal(false);
+      }
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') toggleStrictnessModal(false);
+    });
   </script>
 </body>
 </html>
