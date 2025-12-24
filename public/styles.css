@@ -347,6 +347,95 @@ a.button {
   backdrop-filter: blur(4px);
 }
 
+.test-form {
+  display: grid;
+  gap: 14px;
+}
+
+.test-form .field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.test-form input,
+.test-form textarea {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  padding: 10px 12px;
+  color: var(--text);
+  font: inherit;
+}
+
+.test-form textarea {
+  resize: vertical;
+  min-height: 90px;
+}
+
+.evaluation-summary {
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px;
+}
+
+.summary-value {
+  font-size: 1.1rem;
+  margin: 4px 0 0;
+}
+
+.evaluation-details {
+  margin-top: 16px;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 12px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.evaluation-log {
+  margin-top: 16px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 12px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.log-list {
+  list-style: decimal;
+  padding-left: 18px;
+  margin: 8px 0 0;
+  display: grid;
+  gap: 10px;
+}
+
+.log-list li {
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 10px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.log-list pre {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.8rem;
+}
+
+.evaluation-details pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
 .strictness-row {
   display: flex;
   align-items: center;

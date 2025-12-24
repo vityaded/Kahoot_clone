@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Answer Evaluation Test</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="library">
+  <div class="glow"></div>
+  <header class="hero">
+    <div>
+      <p class="eyebrow">Evaluation lab</p>
+      <h1>Test answer grading rules</h1>
+      <p class="lede">Enter a prompt, the accepted answers, and a player submission to see the evaluation details.</p>
+      <div class="cta-row">
+        <a class="button ghost" href="/">Back to library</a>
+      </div>
+    </div>
+    <div class="hero-card">
+      <h2>What this page does</h2>
+      <ol>
+        <li>Builds a single evaluation question.</li>
+        <li>Sends it to the rule engine used in homework/live sessions.</li>
+        <li>Shows the response and normalization details.</li>
+      </ol>
+      <p class="muted">Uses the same strictness settings from the Quiz Control Hub.</p>
+    </div>
+  </header>
+
+  <main class="grid">
+    <section class="card">
+      <div class="card-heading">
+        <div>
+          <p class="eyebrow">Input</p>
+          <h2>Question & answer data</h2>
+        </div>
+      </div>
+      <form id="evaluation-form" class="test-form">
+        <label class="field">
+          <span class="eyebrow">Question prompt (optional)</span>
+          <textarea id="prompt" rows="3" placeholder="What is the capital of France?"></textarea>
+        </label>
+        <label class="field">
+          <span class="eyebrow">Correct answer</span>
+          <input id="answer" type="text" placeholder="Paris" required />
+        </label>
+        <label class="field">
+          <span class="eyebrow">Alternate answers (one per line)</span>
+          <textarea id="alternate-answers" rows="3" placeholder="City of Light"></textarea>
+        </label>
+        <label class="field">
+          <span class="eyebrow">Partial-credit answers (one per line)</span>
+          <textarea id="partial-answers" rows="3" placeholder="France"></textarea>
+        </label>
+        <label class="field">
+          <span class="eyebrow">Player submission</span>
+          <input id="submission" type="text" placeholder="Paris" required />
+        </label>
+        <button type="submit" class="button">Evaluate answer</button>
+        <p id="status" class="muted" aria-live="polite"></p>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="card-heading">
+        <div>
+          <p class="eyebrow">Output</p>
+          <h2>Evaluation result</h2>
+          <p class="muted">The grading engine response appears below.</p>
+        </div>
+      </div>
+      <div id="evaluation-summary" class="evaluation-summary">
+        <p class="muted">Submit a test to see results.</p>
+      </div>
+      <div id="evaluation-log" class="evaluation-log" hidden>
+        <p class="eyebrow">Evaluation log</p>
+        <ol id="evaluation-log-list" class="log-list"></ol>
+      </div>
+      <details class="evaluation-details" id="evaluation-details" hidden>
+        <summary>View full response</summary>
+        <pre id="evaluation-json"></pre>
+      </details>
+    </section>
+  </main>
+
+  <script>
+    const form = document.getElementById('evaluation-form');
+    const statusEl = document.getElementById('status');
+    const summaryEl = document.getElementById('evaluation-summary');
+    const logWrapper = document.getElementById('evaluation-log');
+    const logList = document.getElementById('evaluation-log-list');
+    const detailsEl = document.getElementById('evaluation-details');
+    const jsonEl = document.getElementById('evaluation-json');
+
+    function splitLines(value) {
+      return value
+        .split(/\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+    }
+
+    function renderSummary(payload) {
+      const { evaluation } = payload;
+      const verdict = evaluation.isCorrect
+        ? 'Correct'
+        : evaluation.isPartial
+          ? 'Partial credit'
+          : 'Incorrect';
+
+      summaryEl.innerHTML = `
+        <div class="summary-grid">
+          <div>
+            <p class="eyebrow">Verdict</p>
+            <p class="summary-value">${verdict}</p>
+          </div>
+          <div>
+            <p class="eyebrow">Score</p>
+            <p class="summary-value">${evaluation.earned} pts</p>
+          </div>
+          <div>
+            <p class="eyebrow">Judged by</p>
+            <p class="summary-value">${evaluation.judgedBy}</p>
+          </div>
+          <div>
+            <p class="eyebrow">Correct answer</p>
+            <p class="summary-value">${evaluation.correctAnswer || '—'}</p>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderLog(entries = []) {
+      logList.innerHTML = '';
+      if (!entries.length) {
+        logWrapper.hidden = true;
+        return;
+      }
+      entries.forEach((entry) => {
+        const item = document.createElement('li');
+        const details = entry.details ? `<pre>${JSON.stringify(entry.details, null, 2)}</pre>` : '';
+        item.innerHTML = `<p>${entry.message}</p>${details}`;
+        logList.appendChild(item);
+      });
+      logWrapper.hidden = false;
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      statusEl.textContent = 'Evaluating answer…';
+      detailsEl.hidden = true;
+      logWrapper.hidden = true;
+      jsonEl.textContent = '';
+
+      const payload = {
+        prompt: document.getElementById('prompt').value,
+        answer: document.getElementById('answer').value,
+        alternateAnswers: splitLines(document.getElementById('alternate-answers').value),
+        partialAnswers: splitLines(document.getElementById('partial-answers').value),
+        submission: document.getElementById('submission').value,
+      };
+
+      try {
+        const response = await fetch('/api/test-evaluate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          throw new Error(error.error || 'Evaluation failed.');
+        }
+
+        const data = await response.json();
+        renderSummary(data);
+        renderLog(data.evaluation?.evaluationLog || []);
+        jsonEl.textContent = JSON.stringify(data, null, 2);
+        detailsEl.hidden = false;
+        statusEl.textContent = 'Evaluation complete.';
+      } catch (error) {
+        statusEl.textContent = error.message;
+        summaryEl.innerHTML = '<p class="muted">Evaluation failed. Check inputs and try again.</p>';
+        logWrapper.hidden = true;
+      }
+    });
+  </script>
+</body>
+</html>
