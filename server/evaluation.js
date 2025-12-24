@@ -3,6 +3,7 @@ import {
   isLlmJudgeConfigured,
   judgeAnswerWithLlm,
 } from './llmJudge.js';
+import { getRuleMatchingConfig } from './settings.js';
 
 const synonymCache = new Map();
 
@@ -64,17 +65,20 @@ function levenshtein(a, b) {
   return matrix[left.length][right.length];
 }
 
-export function isCloseMatch(submitted, expected) {
+export function isCloseMatch(submitted, expected, config) {
+  const { closeMatchThreshold = 0.8, allowSubstrings = true } = config || {};
   const distance = levenshtein(submitted, expected);
   const maxLen = Math.max(submitted.length, expected.length) || 1;
   const closeness = 1 - distance / maxLen;
 
-  if (closeness >= 0.8) return true;
+  if (closeness >= closeMatchThreshold) return true;
   if (distance === 1 && Math.min(submitted.length, expected.length) >= 3) return true;
-  if (distance === 2 && maxLen >= 6 && closeness >= 0.7) return true;
+  if (distance === 2 && maxLen >= 6 && closeness >= Math.max(0.65, closeMatchThreshold - 0.1)) return true;
 
-  if (submitted.length >= 5 && expected.includes(submitted)) return true;
-  if (expected.length >= 5 && submitted.includes(expected)) return true;
+  if (allowSubstrings) {
+    if (submitted.length >= 5 && expected.includes(submitted)) return true;
+    if (expected.length >= 5 && submitted.includes(expected)) return true;
+  }
 
   return false;
 }
@@ -143,7 +147,8 @@ export async function evaluateAnswer(question, submission, options = {}) {
   const normalizedSubmitted = normaliseAnswer(submission ?? '');
   const normalizedExpected = expectedAnswers.map(normaliseAnswer);
   const normalizedPartial = (question.partialAnswers || []).map(normaliseAnswer);
-  const normalizedSynonyms = await collectSynonyms(expectedAnswers);
+  const cfg = getRuleMatchingConfig();
+  const normalizedSynonyms = cfg.allowSynonyms ? await collectSynonyms(expectedAnswers) : [];
 
   // Space-insensitive variants help accept answers with different hyphenation/
   // punctuation spacing (e.g., "e-mail" vs "email", "well-known" vs "well known").
@@ -152,18 +157,29 @@ export async function evaluateAnswer(question, submission, options = {}) {
 
   let isCorrect =
     normalizedExpected.some((expected) => normalizedSubmitted === expected) ||
-    (compactSubmitted && compactExpected.some((e) => e === compactSubmitted));
-  let isPartial =
-    !isCorrect &&
-    (normalizedPartial.includes(normalizedSubmitted) ||
-      normalizedSynonyms.includes(normalizedSubmitted) ||
-      normalizedSynonyms.some((syn) => isCloseMatch(normalizedSubmitted, syn)) ||
-      normalizedExpected.some((expected) => isCloseMatch(normalizedSubmitted, expected)));
+    (cfg.allowCompactMatch && compactSubmitted && compactExpected.some((e) => e === compactSubmitted));
+  let isPartial = false;
+
+  if (!isCorrect) {
+    if (normalizedPartial.includes(normalizedSubmitted)) {
+      isPartial = true;
+    } else {
+      if (cfg.allowSynonyms && normalizedSynonyms.includes(normalizedSubmitted)) isPartial = true;
+
+      if (!isPartial && cfg.allowCloseMatch) {
+        if (cfg.allowSynonyms && normalizedSynonyms.some((syn) => isCloseMatch(normalizedSubmitted, syn, cfg))) {
+          isPartial = true;
+        } else if (normalizedExpected.some((expected) => isCloseMatch(normalizedSubmitted, expected, cfg))) {
+          isPartial = true;
+        }
+      }
+    }
+  }
 
   // LLM fallback for edge cases (e.g., close paraphrases, punctuation-heavy answers).
   // Only runs when rule-based matching fails.
   let judgedBy = 'rules';
-  if (!isCorrect && !isPartial && isLlmJudgeConfigured() && normalizedSubmitted) {
+  if (!isCorrect && !isPartial && cfg.allowLLMFallback && isLlmJudgeConfigured() && normalizedSubmitted) {
     const llmResult = await judgeAnswerWithLlm({
       questionPrompt: question?.prompt || '',
       expectedAnswers,
