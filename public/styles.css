@@ -368,6 +368,34 @@ a.button {
   letter-spacing: 0.05em;
 }
 
+.strictness-controls {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.strictness-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.strictness-actions select {
+  min-width: 200px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(13, 18, 34, 0.7);
+  color: var(--text);
+}
+
+.strictness-actions select:focus {
+  outline: 2px solid rgba(124, 240, 255, 0.5);
+  outline-offset: 2px;
+}
+
 .criteria-list {
   margin: 8px 0 16px;
   padding-left: 18px;

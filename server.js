@@ -11,7 +11,14 @@ import {
   normalise,
   scoreSubmission,
 } from './server/evaluation.js';
-import { getAnswerStrictness, getLlmConfigOverrides, getRuleMatchingConfig } from './server/settings.js';
+import {
+  getAnswerStrictness,
+  getLlmConfigOverrides,
+  getRuleMatchingConfig,
+  loadSettings,
+  parseAnswerStrictness,
+  saveAnswerStrictness,
+} from './server/settings.js';
 import { DATA_DIR, DATA_FILE, HOMEWORK_FILE, MEDIA_DIR, ensureDataDir, ensureMediaDir } from './server/storage.js';
 import { importApkgFromPath } from './server/importApkg.js';
 
@@ -38,6 +45,27 @@ app.get('/api/settings/answer-strictness', (_req, res) => {
     ruleConfig: getRuleMatchingConfig(),
     llmDefaults: getLlmConfigOverrides(),
   });
+});
+
+app.post('/api/settings/answer-strictness', async (req, res) => {
+  const normalized = parseAnswerStrictness(req.body?.strictness);
+  if (!normalized) {
+    res.status(400).json({ error: 'Strictness must be strict, normal, or lenient.' });
+    return;
+  }
+
+  try {
+    await saveAnswerStrictness(normalized);
+    res.json({
+      strictness: getAnswerStrictness(),
+      ruleConfig: getRuleMatchingConfig(),
+      llmDefaults: getLlmConfigOverrides(),
+    });
+  } catch (error) {
+    /* eslint-disable no-console */
+    console.error('Failed to save strictness settings', error);
+    res.status(500).json({ error: 'Unable to save strictness settings right now.' });
+  }
 });
 
 function serializeForStorage() {
@@ -564,6 +592,7 @@ function endQuestion(sessionId, { fastForward = false } = {}) {
 
 await ensureDataDir();
 await ensureMediaDir();
+await loadSettings();
 await loadPersistedQuizzes();
 await loadPersistedHomeworkSessions();
 
