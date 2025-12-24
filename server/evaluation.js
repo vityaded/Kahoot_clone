@@ -173,24 +173,25 @@ export async function evaluateAnswer(question, submission, options = {}) {
     llmAlreadyTried = true;
     log('LLM primary enabled, sending to LLM judge.');
     const llmResult = await judgeAnswerWithLlm({
-      questionPrompt: question?.prompt || '',
-      expectedAnswers,
-      submission: String(submission ?? ''),
+      questionText: question?.prompt || '',
+      expectedAnswer: expectedAnswers.join(' | '),
+      userAnswer: String(submission ?? ''),
     });
     log('LLM primary response', llmResult);
     const threshold = getLlmConfidenceThreshold();
     const llmConfidence = llmResult?.confidence ?? 0;
-    if (llmResult?.verdict === 'CORRECT' && llmConfidence >= threshold) {
+    const llmVerdict = String(llmResult?.verdict || '').toUpperCase();
+    if (llmVerdict === 'GOOD' && llmConfidence >= threshold) {
       isCorrect = true;
       judgedBy = 'llm';
       llmDecided = true;
       log('LLM primary verdict accepted as correct.');
-    } else if (llmResult?.verdict === 'PARTIAL' && llmConfidence >= threshold) {
+    } else if (llmVerdict === 'ALMOST' && llmConfidence >= threshold) {
       isPartial = true;
       judgedBy = 'llm';
       llmDecided = true;
       log('LLM primary verdict accepted as partial.');
-    } else if (llmResult?.verdict === 'WRONG' && llmConfidence >= threshold) {
+    } else if (llmVerdict === 'BAD' && llmConfidence >= threshold) {
       judgedBy = 'llm';
       llmDecided = true;
       log('LLM primary verdict accepted as wrong.');
@@ -245,17 +246,18 @@ export async function evaluateAnswer(question, submission, options = {}) {
     llmAlreadyTried = true;
     log('LLM fallback enabled, sending to LLM judge.');
     const llmResult = await judgeAnswerWithLlm({
-      questionPrompt: question?.prompt || '',
-      expectedAnswers,
-      submission: String(submission ?? ''),
+      questionText: question?.prompt || '',
+      expectedAnswer: expectedAnswers.join(' | '),
+      userAnswer: String(submission ?? ''),
     });
     log('LLM fallback response', llmResult);
     const threshold = getLlmConfidenceThreshold();
-    if (llmResult?.verdict === 'CORRECT' && (llmResult.confidence ?? 0) >= threshold) {
+    const llmVerdict = String(llmResult?.verdict || '').toUpperCase();
+    if (llmVerdict === 'GOOD' && (llmResult.confidence ?? 0) >= threshold) {
       isCorrect = true;
       judgedBy = 'llm';
       log('LLM fallback verdict accepted as correct.');
-    } else if (llmResult?.verdict === 'PARTIAL' && (llmResult.confidence ?? 0) >= threshold) {
+    } else if (llmVerdict === 'ALMOST' && (llmResult.confidence ?? 0) >= threshold) {
       isPartial = true;
       judgedBy = 'llm';
       log('LLM fallback verdict accepted as partial.');
