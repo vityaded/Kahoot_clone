@@ -150,6 +150,7 @@ export async function evaluateAnswer(question, submission, options = {}) {
   const normalizedPartial = (question.partialAnswers || []).map(normaliseAnswer);
   const cfg = getRuleMatchingConfig();
   let llmAlreadyTried = false;
+  let llmDecided = false;
   const evaluationLog = [];
 
   const log = (message, details = null) => {
@@ -178,18 +179,25 @@ export async function evaluateAnswer(question, submission, options = {}) {
     });
     log('LLM primary response', llmResult);
     const threshold = getLlmConfidenceThreshold();
-    if (llmResult?.verdict === 'CORRECT' && (llmResult.confidence ?? 0) >= threshold) {
+    const llmConfidence = llmResult?.confidence ?? 0;
+    if (llmResult?.verdict === 'CORRECT' && llmConfidence >= threshold) {
       isCorrect = true;
       judgedBy = 'llm';
+      llmDecided = true;
       log('LLM primary verdict accepted as correct.');
-    } else if (llmResult?.verdict === 'PARTIAL' && (llmResult.confidence ?? 0) >= threshold) {
+    } else if (llmResult?.verdict === 'PARTIAL' && llmConfidence >= threshold) {
       isPartial = true;
       judgedBy = 'llm';
+      llmDecided = true;
       log('LLM primary verdict accepted as partial.');
+    } else if (llmResult?.verdict === 'WRONG' && llmConfidence >= threshold) {
+      judgedBy = 'llm';
+      llmDecided = true;
+      log('LLM primary verdict accepted as wrong.');
     }
   }
 
-  if (!isCorrect && !isPartial) {
+  if (!llmDecided && !isCorrect && !isPartial) {
     const normalizedSynonyms = cfg.allowSynonyms ? await collectSynonyms(expectedAnswers) : [];
     if (cfg.allowSynonyms) {
       log('Synonym lookup results', normalizedSynonyms);
