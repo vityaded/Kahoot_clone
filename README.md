@@ -32,7 +32,7 @@ PORT=4000 npm start
 ## LLM judge configuration
 The server can optionally use an LLM to judge free-text answers. To enable Gemini:
 
-1. Set `GEMINI_API_KEY` for the server process running `server/llmJudge.js` (hosting config, `.env`, or process manager). When both Gemini and OpenAI keys are present, Gemini is tried first.
+1. Set `GEMINI_API_KEY` for the server process running `server/llmJudge.js`. When both Gemini and OpenAI keys are present, Gemini is tried first. You can place keys in a local `.env` file (loaded automatically at startup) or export them via your process manager.
 2. (Optional) Set `GEMINI_MODEL` to override the default (`gemma-3-27b-it`).
 3. Restart the server so `server/llmJudge.js` picks up the environment variables.
 4. Enable LLM primary judging (set `LLM_PRIMARY_ENABLED=true`), then trigger a submission with debug logs. You should see
