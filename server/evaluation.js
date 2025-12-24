@@ -148,29 +148,53 @@ export async function evaluateAnswer(question, submission, options = {}) {
   const normalizedExpected = expectedAnswers.map(normaliseAnswer);
   const normalizedPartial = (question.partialAnswers || []).map(normaliseAnswer);
   const cfg = getRuleMatchingConfig();
-  const normalizedSynonyms = cfg.allowSynonyms ? await collectSynonyms(expectedAnswers) : [];
+  let llmAlreadyTried = false;
 
-  // Space-insensitive variants help accept answers with different hyphenation/
-  // punctuation spacing (e.g., "e-mail" vs "email", "well-known" vs "well known").
-  const compactSubmitted = normalizedSubmitted.replace(/\s+/g, '');
-  const compactExpected = normalizedExpected.map((e) => e.replace(/\s+/g, ''));
-
-  let isCorrect =
-    normalizedExpected.some((expected) => normalizedSubmitted === expected) ||
-    (cfg.allowCompactMatch && compactSubmitted && compactExpected.some((e) => e === compactSubmitted));
+  let isCorrect = false;
   let isPartial = false;
+  let judgedBy = 'rules';
 
-  if (!isCorrect) {
-    if (normalizedPartial.includes(normalizedSubmitted)) {
+  if (cfg.llmPrimaryEnabled && isLlmJudgeConfigured() && normalizedSubmitted) {
+    llmAlreadyTried = true;
+    const llmResult = await judgeAnswerWithLlm({
+      questionPrompt: question?.prompt || '',
+      expectedAnswers,
+      submission: String(submission ?? ''),
+    });
+    const threshold = getLlmConfidenceThreshold();
+    if (llmResult?.verdict === 'CORRECT' && (llmResult.confidence ?? 0) >= threshold) {
+      isCorrect = true;
+      judgedBy = 'llm';
+    } else if (llmResult?.verdict === 'PARTIAL' && (llmResult.confidence ?? 0) >= threshold) {
       isPartial = true;
-    } else {
-      if (cfg.allowSynonyms && normalizedSynonyms.includes(normalizedSubmitted)) isPartial = true;
+      judgedBy = 'llm';
+    }
+  }
 
-      if (!isPartial && cfg.allowCloseMatch) {
-        if (cfg.allowSynonyms && normalizedSynonyms.some((syn) => isCloseMatch(normalizedSubmitted, syn, cfg))) {
-          isPartial = true;
-        } else if (normalizedExpected.some((expected) => isCloseMatch(normalizedSubmitted, expected, cfg))) {
-          isPartial = true;
+  if (!isCorrect && !isPartial) {
+    const normalizedSynonyms = cfg.allowSynonyms ? await collectSynonyms(expectedAnswers) : [];
+
+    // Space-insensitive variants help accept answers with different hyphenation/
+    // punctuation spacing (e.g., "e-mail" vs "email", "well-known" vs "well known").
+    const compactSubmitted = normalizedSubmitted.replace(/\s+/g, '');
+    const compactExpected = normalizedExpected.map((e) => e.replace(/\s+/g, ''));
+
+    isCorrect =
+      normalizedExpected.some((expected) => normalizedSubmitted === expected) ||
+      (cfg.allowCompactMatch && compactSubmitted && compactExpected.some((e) => e === compactSubmitted));
+
+    if (!isCorrect) {
+      if (normalizedPartial.includes(normalizedSubmitted)) {
+        isPartial = true;
+      } else {
+        if (cfg.allowSynonyms && normalizedSynonyms.includes(normalizedSubmitted)) isPartial = true;
+
+        if (!isPartial && cfg.allowCloseMatch) {
+          if (cfg.allowSynonyms && normalizedSynonyms.some((syn) => isCloseMatch(normalizedSubmitted, syn, cfg))) {
+            isPartial = true;
+          } else if (normalizedExpected.some((expected) => isCloseMatch(normalizedSubmitted, expected, cfg))) {
+            isPartial = true;
+          }
         }
       }
     }
@@ -178,8 +202,8 @@ export async function evaluateAnswer(question, submission, options = {}) {
 
   // LLM fallback for edge cases (e.g., close paraphrases, punctuation-heavy answers).
   // Only runs when rule-based matching fails.
-  let judgedBy = 'rules';
-  if (!isCorrect && !isPartial && cfg.allowLLMFallback && isLlmJudgeConfigured() && normalizedSubmitted) {
+  if (!isCorrect && !isPartial && cfg.allowLLMFallback && !llmAlreadyTried && isLlmJudgeConfigured() && normalizedSubmitted) {
+    llmAlreadyTried = true;
     const llmResult = await judgeAnswerWithLlm({
       questionPrompt: question?.prompt || '',
       expectedAnswers,

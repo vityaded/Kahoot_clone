@@ -66,6 +66,14 @@
             <span>Enable LLM fallback</span>
           </span>
         </label>
+        <label class="strictness-toggle">
+          <span class="eyebrow">LLM grading</span>
+          <span class="toggle-control">
+            <input type="checkbox" id="llm-primary-toggle" disabled />
+            <span class="toggle-slider" aria-hidden="true"></span>
+            <span>Streamline to LLM</span>
+          </span>
+        </label>
         <p class="muted" id="strictness-status" aria-live="polite"></p>
       </div>
       <p class="muted" id="strictness-rules"></p>
@@ -130,9 +138,11 @@
     const strictnessSave = document.getElementById('save-strictness');
     const strictnessStatus = document.getElementById('strictness-status');
     const llmFallbackToggle = document.getElementById('llm-fallback-toggle');
+    const llmPrimaryToggle = document.getElementById('llm-primary-toggle');
     let isImporting = false;
     let lastStrictness = 'normal';
     let lastLlmFallback = null;
+    let lastLlmPrimary = null;
 
     function formatDate(timestamp) {
       const date = new Date(timestamp);
@@ -237,7 +247,11 @@
       const ruleConfig = payload?.ruleConfig || {};
       const llmDefaults = payload?.llmDefaults || {};
       const llmFallbackEnabled = payload?.llmFallbackEnabled ?? ruleConfig.allowLLMFallback ?? false;
-      const summarySuffix = llmFallbackEnabled ? '' : ' LLM fallback is disabled.';
+      const llmPrimaryEnabled = payload?.llmPrimaryEnabled ?? false;
+      const summaryParts = [];
+      if (!llmFallbackEnabled) summaryParts.push('LLM fallback is disabled.');
+      if (llmPrimaryEnabled) summaryParts.push('LLM grading is set to primary.');
+      const summarySuffix = summaryParts.length ? ` ${summaryParts.join(' ')}` : '';
       strictnessSummary.textContent = `${copy.summary}${summarySuffix}`;
       strictnessModalSummary.textContent = `${copy.summary}${summarySuffix}`;
       strictnessPill.textContent = copy.title;
@@ -245,8 +259,11 @@
       strictnessSelect.value = strictness;
       strictnessSave.disabled = true;
       lastLlmFallback = llmFallbackEnabled;
+      lastLlmPrimary = llmPrimaryEnabled;
       llmFallbackToggle.checked = llmFallbackEnabled;
       llmFallbackToggle.disabled = false;
+      llmPrimaryToggle.checked = llmPrimaryEnabled;
+      llmPrimaryToggle.disabled = false;
 
       strictnessOk.innerHTML = '';
       copy.ok.forEach((item) => {
@@ -270,7 +287,9 @@
       const compact = ruleConfig.allowCompactMatch ? 'Compact match enabled' : 'Compact match disabled';
       strictnessRules.textContent = `Rules: ${compact} · ${closeMatch} · ${synonyms} · ${substrings}`;
 
-      if (ruleConfig.allowLLMFallback) {
+      if (llmPrimaryEnabled) {
+        strictnessLlm.textContent = `LLM grading: primary (${llmDefaults.mode} mode, confidence ≥ ${(llmDefaults.confidenceThreshold ?? 0.8).toFixed(2)})`;
+      } else if (ruleConfig.allowLLMFallback) {
         strictnessLlm.textContent = `LLM fallback: enabled (${llmDefaults.mode} mode, confidence ≥ ${(llmDefaults.confidenceThreshold ?? 0.8).toFixed(2)})`;
       } else {
         strictnessLlm.textContent = 'LLM fallback: disabled';
@@ -403,6 +422,30 @@
         llmFallbackToggle.checked = lastLlmFallback ?? false;
         llmFallbackToggle.disabled = false;
         setStrictnessStatus(error.message || 'Unable to update LLM fallback right now.', true);
+      }
+    });
+
+    llmPrimaryToggle.addEventListener('change', async () => {
+      const enabled = llmPrimaryToggle.checked;
+      llmPrimaryToggle.disabled = true;
+      setStrictnessStatus('Saving LLM grading preference…');
+      try {
+        const response = await fetch('/api/settings/answer-strictness', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ llmPrimaryEnabled: enabled }),
+        });
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          throw new Error(data?.error || 'Unable to update LLM grading preference.');
+        }
+        const payload = await response.json();
+        renderStrictnessDetails(payload);
+        setStrictnessStatus('Saved. LLM grading updated.');
+      } catch (error) {
+        llmPrimaryToggle.checked = lastLlmPrimary ?? false;
+        llmPrimaryToggle.disabled = false;
+        setStrictnessStatus(error.message || 'Unable to update LLM grading right now.', true);
       }
     });
 
