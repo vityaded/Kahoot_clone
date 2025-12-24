@@ -82,6 +82,49 @@
         <pre id="evaluation-json"></pre>
       </details>
     </section>
+
+    <section class="card">
+      <div class="card-heading">
+        <div>
+          <p class="eyebrow">LLM input</p>
+          <h2>Chat with the LLM</h2>
+          <p class="muted">Send a prompt and review the response plus the provider log.</p>
+        </div>
+      </div>
+      <form id="llm-form" class="test-form">
+        <label class="field">
+          <span class="eyebrow">System prompt (optional)</span>
+          <textarea id="llm-system-prompt" rows="3" placeholder="You are a helpful assistant for quiz authors."></textarea>
+        </label>
+        <label class="field">
+          <span class="eyebrow">Prompt</span>
+          <textarea id="llm-prompt" rows="4" placeholder="Write three question ideas about the solar system." required></textarea>
+        </label>
+        <button type="submit" class="button">Send to LLM</button>
+        <p id="llm-status" class="muted" aria-live="polite"></p>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="card-heading">
+        <div>
+          <p class="eyebrow">LLM output</p>
+          <h2>Response</h2>
+          <p class="muted">Review the latest response and log details.</p>
+        </div>
+      </div>
+      <div id="llm-response" class="evaluation-summary">
+        <p class="muted">Submit a prompt to see the response.</p>
+      </div>
+      <div id="llm-log" class="evaluation-log" hidden>
+        <p class="eyebrow">LLM log</p>
+        <ol id="llm-log-list" class="log-list"></ol>
+      </div>
+      <details class="evaluation-details" id="llm-details" hidden>
+        <summary>View full response</summary>
+        <pre id="llm-json"></pre>
+      </details>
+    </section>
   </main>
 
   <script>
@@ -92,6 +135,13 @@
     const logList = document.getElementById('evaluation-log-list');
     const detailsEl = document.getElementById('evaluation-details');
     const jsonEl = document.getElementById('evaluation-json');
+    const llmForm = document.getElementById('llm-form');
+    const llmStatusEl = document.getElementById('llm-status');
+    const llmResponseEl = document.getElementById('llm-response');
+    const llmLogWrapper = document.getElementById('llm-log');
+    const llmLogList = document.getElementById('llm-log-list');
+    const llmDetailsEl = document.getElementById('llm-details');
+    const llmJsonEl = document.getElementById('llm-json');
 
     function splitLines(value) {
       return value
@@ -130,19 +180,19 @@
       `;
     }
 
-    function renderLog(entries = []) {
-      logList.innerHTML = '';
+    function renderLog(entries = [], listEl, wrapperEl) {
+      listEl.innerHTML = '';
       if (!entries.length) {
-        logWrapper.hidden = true;
+        wrapperEl.hidden = true;
         return;
       }
       entries.forEach((entry) => {
         const item = document.createElement('li');
         const details = entry.details ? `<pre>${JSON.stringify(entry.details, null, 2)}</pre>` : '';
         item.innerHTML = `<p>${entry.message}</p>${details}`;
-        logList.appendChild(item);
+        listEl.appendChild(item);
       });
-      logWrapper.hidden = false;
+      wrapperEl.hidden = false;
     }
 
     form.addEventListener('submit', async (event) => {
@@ -174,7 +224,7 @@
 
         const data = await response.json();
         renderSummary(data);
-        renderLog(data.evaluation?.evaluationLog || []);
+        renderLog(data.evaluation?.evaluationLog || [], logList, logWrapper);
         jsonEl.textContent = JSON.stringify(data, null, 2);
         detailsEl.hidden = false;
         statusEl.textContent = 'Evaluation complete.';
@@ -182,6 +232,57 @@
         statusEl.textContent = error.message;
         summaryEl.innerHTML = '<p class="muted">Evaluation failed. Check inputs and try again.</p>';
         logWrapper.hidden = true;
+      }
+    });
+
+    llmForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      llmStatusEl.textContent = 'Sending prompt to the LLM…';
+      llmDetailsEl.hidden = true;
+      llmLogWrapper.hidden = true;
+      llmJsonEl.textContent = '';
+
+      const payload = {
+        prompt: document.getElementById('llm-prompt').value,
+        systemPrompt: document.getElementById('llm-system-prompt').value,
+      };
+
+      try {
+        const response = await fetch('/api/test-llm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          throw new Error(error.error || 'LLM request failed.');
+        }
+
+        const data = await response.json();
+        llmResponseEl.innerHTML = `
+          <div class="summary-grid">
+            <div>
+              <p class="eyebrow">Provider</p>
+              <p class="summary-value">${data.provider || '—'}</p>
+            </div>
+            <div>
+              <p class="eyebrow">Model</p>
+              <p class="summary-value">${data.model || '—'}</p>
+            </div>
+          </div>
+          <p class="summary-value" id="llm-response-text" style="margin-top: 12px;"></p>
+        `;
+        const responseText = document.getElementById('llm-response-text');
+        if (responseText) responseText.textContent = data.response || '—';
+        renderLog(data.log || [], llmLogList, llmLogWrapper);
+        llmJsonEl.textContent = JSON.stringify(data, null, 2);
+        llmDetailsEl.hidden = false;
+        llmStatusEl.textContent = 'LLM response received.';
+      } catch (error) {
+        llmStatusEl.textContent = error.message;
+        llmResponseEl.innerHTML = '<p class="muted">LLM request failed. Check configuration and try again.</p>';
+        llmLogWrapper.hidden = true;
       }
     });
   </script>

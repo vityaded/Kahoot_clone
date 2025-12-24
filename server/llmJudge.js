@@ -214,6 +214,68 @@ async function callGemini({ url, systemPrompt, userPrompt }) {
   return out;
 }
 
+function buildDefaultChatSystemPrompt() {
+  return 'You are a helpful assistant for quiz authors.';
+}
+
+export async function runLlmChat({ prompt, systemPrompt }) {
+  if (PROVIDERS.length === 0) {
+    const error = new Error('No LLM providers configured.');
+    error.log = [{ message: 'No LLM providers configured.' }];
+    throw error;
+  }
+
+  const log = [];
+  const userPrompt = String(prompt || '').trim();
+  const systemText = String(systemPrompt || '').trim() || buildDefaultChatSystemPrompt();
+
+  log.push({
+    message: 'Preparing LLM chat request.',
+    details: {
+      providers: [...PROVIDERS],
+      systemPrompt: systemText,
+      prompt: userPrompt,
+    },
+  });
+
+  for (const provider of PROVIDERS) {
+    try {
+      log.push({ message: `Calling ${provider} provider.` });
+      if (provider === 'gemini') {
+        const response = await callGemini({ url: GEMINI_URL, systemPrompt: systemText, userPrompt });
+        log.push({
+          message: 'Gemini response received.',
+          details: { provider, model: GEMINI_MODEL, response },
+        });
+        return { provider, model: GEMINI_MODEL, response, log };
+      }
+      if (provider === 'openai') {
+        const response = await callOpenAiCompatible({
+          url: OPENAI_URL,
+          apiKey: OPENAI_API_KEY,
+          model: OPENAI_MODEL,
+          systemPrompt: systemText,
+          userPrompt,
+        });
+        log.push({
+          message: 'OpenAI response received.',
+          details: { provider, model: OPENAI_MODEL, response },
+        });
+        return { provider, model: OPENAI_MODEL, response, log };
+      }
+    } catch (err) {
+      log.push({
+        message: `${provider} provider failed.`,
+        details: { error: err?.message || String(err) },
+      });
+    }
+  }
+
+  const error = new Error('All LLM providers failed.');
+  error.log = log;
+  throw error;
+}
+
 export async function judgeAnswerWithLlm({ questionPrompt, expectedAnswers, submission }) {
   if (PROVIDERS.length === 0) return null;
 

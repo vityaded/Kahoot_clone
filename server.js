@@ -12,6 +12,7 @@ import {
   normaliseAnswer,
   scoreSubmission,
 } from './server/evaluation.js';
+import { isLlmJudgeConfigured, runLlmChat } from './server/llmJudge.js';
 import {
   getAnswerStrictness,
   getLlmConfigOverrides,
@@ -160,6 +161,42 @@ app.post('/api/test-evaluate', async (req, res) => {
     /* eslint-disable no-console */
     console.error('Failed to evaluate test answer', error);
     res.status(500).json({ error: 'Unable to evaluate answer right now.' });
+  }
+});
+
+app.post('/api/test-llm', async (req, res) => {
+  const prompt = String(req.body?.prompt ?? '').trim();
+  const systemPrompt = String(req.body?.systemPrompt ?? '').trim();
+
+  if (!prompt) {
+    res.status(400).json({ error: 'Prompt is required.' });
+    return;
+  }
+
+  if (!isLlmJudgeConfigured()) {
+    res.status(400).json({ error: 'No LLM providers configured.' });
+    return;
+  }
+
+  try {
+    const result = await runLlmChat({ prompt, systemPrompt });
+    res.json({
+      provider: result.provider,
+      model: result.model,
+      response: result.response,
+      log: result.log,
+      request: {
+        prompt,
+        systemPrompt,
+      },
+    });
+  } catch (error) {
+    /* eslint-disable no-console */
+    console.error('Failed to run LLM chat', error);
+    res.status(500).json({
+      error: error?.message || 'Unable to contact the LLM right now.',
+      log: error?.log ?? [],
+    });
   }
 });
 
