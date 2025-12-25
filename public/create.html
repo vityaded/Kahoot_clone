@@ -31,6 +31,10 @@
         </label>
         <div class="questions" id="question-list"></div>
         <button type="button" class="ghost" id="add-question">+ Add question</button>
+        <label>
+          LLM grading context (optional)
+          <textarea id="quiz-context" rows="6" placeholder="Add rubric notes or background context the LLM should use to grade answers."></textarea>
+        </label>
         <div class="bulk-card">
           <h3>Bulk add questions</h3>
           <p class="muted">Paste one question per line using pipes: <code>Question | Answer | Other acceptable answers</code>.</p>
@@ -88,7 +92,7 @@
             <input type="text" name="prompt" placeholder="What is photosynthesis?" value="${prompt}" required />
           </label>
           <label>Expected answer
-            <input type="text" name="answer" placeholder="A process plants use to make food" value="${answer}" required />
+            <input type="text" name="answer" placeholder="A process plants use to make food" value="${answer}" />
           </label>
           <label>Alternate answers (separate with ||)
             <input type="text" name="alternate" placeholder="Other phrasing that should count as correct (use || between options)" value="${alternateAnswers.join(' || ')}" />
@@ -143,12 +147,15 @@
       });
     }
 
-    async function buildQuestions() {
+    async function buildQuestions(context) {
       const rows = Array.from(questionList.querySelectorAll('.question-row'));
       const questions = [];
-      for (const row of rows) {
+      for (const [index, row] of rows.entries()) {
         const prompt = row.querySelector('input[name="prompt"]').value;
         const answer = row.querySelector('input[name="answer"]').value;
+        if (!answer.trim() && !context.trim()) {
+          throw new Error(`Question ${index + 1} needs an expected answer or quiz context for LLM grading.`);
+        }
         const alternateRaw = row.querySelector('input[name="alternate"]').value;
         const partialRaw = row.querySelector('input[name="partial"]').value;
         const alternateAnswers = alternateRaw
@@ -248,11 +255,22 @@
       event.preventDefault();
       formError.textContent = '';
       quizCodeEl.textContent = 'Creating quiz...';
-      const questions = await buildQuestions();
-      const title = document.getElementById('quiz-title').value;
-      const questionDuration = document.getElementById('question-duration').value;
+      try {
+        const context = document.getElementById('quiz-context').value;
+        const questions = await buildQuestions(context);
+        const title = document.getElementById('quiz-title').value;
+        const questionDuration = document.getElementById('question-duration').value;
 
-      socket.emit('host:createQuiz', { title, questions, questionDuration });
+        socket.emit('host:createQuiz', {
+          title,
+          questions,
+          questionDuration,
+          context,
+        });
+      } catch (error) {
+        formError.textContent = error?.message || 'Unable to build quiz questions.';
+        quizCodeEl.textContent = 'Waiting for quiz...';
+      }
     });
 
     socket.on('host:error', (message) => {
