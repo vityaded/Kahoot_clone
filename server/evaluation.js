@@ -142,6 +142,7 @@ export async function evaluateAnswer(question, submission, options = {}) {
     timeRemainingMs = null,
     includeSpeedBonus = true,
     debug = false,
+    context = '',
   } = options;
 
   const expectedAnswers = [question.answer, ...(question.alternateAnswers || [])].filter(Boolean);
@@ -174,6 +175,7 @@ export async function evaluateAnswer(question, submission, options = {}) {
     log('LLM primary enabled, sending to LLM judge.');
     const llmResult = await judgeAnswerWithLlm({
       questionText: question?.prompt || '',
+      context: context || question?.context || '',
       expectedAnswer: expectedAnswers.join(' | '),
       userAnswer: String(submission ?? ''),
     });
@@ -247,6 +249,7 @@ export async function evaluateAnswer(question, submission, options = {}) {
     log('LLM fallback enabled, sending to LLM judge.');
     const llmResult = await judgeAnswerWithLlm({
       questionText: question?.prompt || '',
+      context: context || question?.context || '',
       expectedAnswer: expectedAnswers.join(' | '),
       userAnswer: String(submission ?? ''),
     });
@@ -284,7 +287,12 @@ export async function evaluateAnswer(question, submission, options = {}) {
 }
 
 export async function scoreSubmission(questions = [], submissions = [], options = {}) {
-  const { durationMs = null, timeRemainingMs = null, includeSpeedBonus = true } = options;
+  const {
+    durationMs = null,
+    timeRemainingMs = null,
+    includeSpeedBonus = true,
+    context = '',
+  } = options;
   let score = 0;
   const responses = [];
 
@@ -298,6 +306,7 @@ export async function scoreSubmission(questions = [], submissions = [], options 
       durationMs: getDuration(i),
       timeRemainingMs: getRemaining(i),
       includeSpeedBonus,
+      context,
     });
 
     score += evaluation.earned;

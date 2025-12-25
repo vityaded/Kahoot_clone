@@ -46,6 +46,7 @@ export function getLlmConfidenceThreshold() {
 // { verdict: "GOOD"|"ALMOST"|"BAD", confidence: number, reason: string }
 export async function judgeAnswerWithLlm({
   questionText,
+  context,
   expectedAnswer,
   userAnswer,
   strictness = STRICTNESS,
@@ -55,7 +56,7 @@ export async function judgeAnswerWithLlm({
   }
 
   const systemPrompt = buildJudgeSystemPrompt(strictness);
-  const userPrompt = buildJudgeUserPrompt({ questionText, expectedAnswer, userAnswer });
+  const userPrompt = buildJudgeUserPrompt({ questionText, context, expectedAnswer, userAnswer });
 
   const attempts = [];
 
@@ -268,16 +269,24 @@ function buildJudgeSystemPrompt(strictness) {
   ].join('\n');
 }
 
-function buildJudgeUserPrompt({ questionText, expectedAnswer, userAnswer }) {
-  return [
+function buildJudgeUserPrompt({ questionText, context, expectedAnswer, userAnswer }) {
+  const lines = [
     'Judge the user answer against the expected answer.',
     '',
     `QUESTION: ${String(questionText || '')}`,
-    `EXPECTED: ${String(expectedAnswer || '')}`,
-    `USER: ${String(userAnswer || '')}`,
-    '',
-    'Return JSON only.',
-  ].join('\n');
+  ];
+
+  if (context) {
+    lines.push(`CONTEXT: ${String(context || '')}`);
+    lines.push('Use the context to judge correctness when the expected answer is blank or incomplete.');
+  }
+
+  lines.push(`EXPECTED: ${String(expectedAnswer || '')}`);
+  lines.push(`USER: ${String(userAnswer || '')}`);
+  lines.push('');
+  lines.push('Return JSON only.');
+
+  return lines.join('\n');
 }
 
 // ───────────────────────────────────────────────────────────────────────────────

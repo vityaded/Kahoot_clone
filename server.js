@@ -208,6 +208,7 @@ function serializeForStorage() {
     questions: quiz.questions,
     questionDuration: quiz.questionDuration,
     createdAt: quiz.createdAt,
+    context: quiz.context || '',
     source: quiz.source || null,
   }));
 }
@@ -228,6 +229,7 @@ async function loadPersistedQuizzes() {
         ...quiz,
         questionDuration: Number(quiz.questionDuration) || 20,
         createdAt: quiz.createdAt || Date.now(),
+        context: String(quiz.context ?? '').trim(),
         source: quiz.source || null,
       });
     });
@@ -315,6 +317,7 @@ function serializeLiveSessions() {
     runSettings: session.runSettings,
     runSettingsConfirmed: session.runSettingsConfirmed,
     questions: session.questions,
+    context: session.context || '',
     players: Array.from(session.players.values()).map((player) => ({
       id: player.id,
       name: player.name,
@@ -370,6 +373,7 @@ async function loadPersistedLiveSessions() {
           ? entry.runSettingsConfirmed
           : template.questions.length <= 10,
         questionDuration: Number(entry.questionDuration) || template.questionDuration,
+        context: String(entry.context ?? template.context ?? '').trim(),
         currentQuestionIndex: Number.isInteger(entry.currentQuestionIndex) ? entry.currentQuestionIndex : -1,
         questionStart: null,
         answers: new Set(Array.isArray(entry.answers) ? entry.answers : []),
@@ -431,12 +435,13 @@ function pruneDisconnectedPlayers(sessionId) {
   emitLeaderboard(sessionId);
 }
 
-function sanitizeQuestions(rawQuestions = []) {
+function sanitizeQuestions(rawQuestions = [], { context } = {}) {
+  const quizContext = String(context ?? '').trim();
   return rawQuestions
-    .filter((q) => q && q.prompt && q.answer)
+    .filter((q) => q && q.prompt)
     .map((q) => ({
       prompt: q.prompt.trim(),
-      answer: q.answer.trim(),
+      answer: String(q.answer ?? '').trim(),
       alternateAnswers: Array.isArray(q.alternateAnswers)
         ? q.alternateAnswers.map((alt) => alt.trim()).filter(Boolean)
         : [],
@@ -445,7 +450,7 @@ function sanitizeQuestions(rawQuestions = []) {
         : [],
       media: buildMediaPayload(q.media),
     }))
-    .filter((q) => q.prompt && q.answer);
+    .filter((q) => q.prompt && (q.answer || quizContext));
 }
 
 function collectMediaSrcsFromQuestions(questions = []) {
@@ -457,8 +462,8 @@ function collectMediaSrcsFromQuestions(questions = []) {
   return out;
 }
 
-function createQuizTemplate({ title, questions, questionDuration, sourceMeta = null }) {
-  const sanitizedQuestions = sanitizeQuestions(questions);
+function createQuizTemplate({ title, questions, questionDuration, context = '', sourceMeta = null }) {
+  const sanitizedQuestions = sanitizeQuestions(questions, { context });
   if (!sanitizedQuestions.length) {
     return null;
   }
@@ -474,6 +479,7 @@ function createQuizTemplate({ title, questions, questionDuration, sourceMeta = n
     questions: sanitizedQuestions,
     questionDuration: Number(questionDuration) || 20,
     createdAt: Date.now(),
+    context: String(context ?? '').trim(),
   };
 
   if (sourceMeta) {
@@ -528,6 +534,7 @@ async function evaluateHomeworkSubmission(session, answers = []) {
 
   const evaluation = await scoreSubmission(template.questions, Array.isArray(answers) ? answers : [], {
     includeSpeedBonus: false,
+    context: template.context,
   });
   return evaluation;
 }
@@ -681,6 +688,7 @@ function createSessionFromTemplate(template, hostId = null) {
     runSettings: { count: template.questions.length, shuffle: false },
     runSettingsConfirmed: template.questions.length <= 10,
     questionDuration: template.questionDuration,
+    context: String(template.context ?? '').trim(),
     currentQuestionIndex: -1,
     questionStart: null,
     answers: new Set(),
@@ -856,15 +864,15 @@ await loadPersistedHomeworkSessions();
 await loadPersistedLiveSessions();
 
 io.on('connection', (socket) => {
-  socket.on('host:createQuiz', ({ title, questions, questionDuration }) => {
+  socket.on('host:createQuiz', ({ title, questions, questionDuration, context }) => {
     try {
       if (!Array.isArray(questions) || questions.length === 0) {
         socket.emit('host:error', 'Please add at least one question.');
         return;
       }
-      const template = createQuizTemplate({ title, questions, questionDuration });
+      const template = createQuizTemplate({ title, questions, questionDuration, context });
       if (!template) {
-        socket.emit('host:error', 'Questions need both prompts and answers.');
+        socket.emit('host:error', 'Each question needs a prompt and either an expected answer or quiz context.');
         return;
       }
 
@@ -1132,6 +1140,7 @@ io.on('connection', (socket) => {
       durationMs,
       timeRemainingMs: timeRemaining,
       includeSpeedBonus: true,
+      context: session.context,
     });
 
     player.score += evaluation.earned;
@@ -1388,6 +1397,7 @@ app.post('/api/homework/:homeworkId/evaluate', async (req, res) => {
     res.status(404).json({ error: 'Homework not found' });
     return;
   }
+  const template = quizTemplates.get(session.templateId);
 
   const questionIndex = Number(req.body?.questionIndex);
   if (!Number.isInteger(questionIndex) || questionIndex < 0 || questionIndex >= session.questions.length) {
@@ -1397,7 +1407,10 @@ app.post('/api/homework/:homeworkId/evaluate', async (req, res) => {
 
   const question = session.questions[questionIndex];
   const answer = req.body?.answer ?? '';
-  const evaluation = await evaluateAnswer(question, answer, { includeSpeedBonus: false });
+  const evaluation = await evaluateAnswer(question, answer, {
+    includeSpeedBonus: false,
+    context: template?.context || '',
+  });
 
   res.json({
     isCorrect: evaluation.isCorrect,
