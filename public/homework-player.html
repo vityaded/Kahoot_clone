@@ -117,6 +117,8 @@
     const leaderboardStatus = document.getElementById('leaderboard-status');
     const leaderboardContinue = document.getElementById('leaderboard-continue');
     const leaderboardTitle = document.getElementById('leaderboard-title');
+    const isWatchMode = ['watch', 'watch-mode', 'watchmode'].includes((params.get('mode') || '').toLowerCase())
+      || ['1', 'true', 'yes'].includes((params.get('watch') || '').toLowerCase());
 
     let questions = [];
     let answers = [];
@@ -127,6 +129,8 @@
     let advancing = false;
     let feedbackTimer = null;
     let leaderboardTimer = null;
+    let mediaAdvanceTarget = null;
+    let mediaAdvanceHandler = null;
 
     function stopTimer() {
       if (timerId) {
@@ -289,10 +293,25 @@
       questionProgress.textContent = `Question ${index + 1} of ${questions.length}`;
       stopTimer();
       questionDuration.textContent = '';
+      nextQuestionButton.classList.toggle('hidden', isWatchMode);
       renderMedia(question.media);
       const mediaEl = getActiveMedia(questionMedia);
+      if (mediaAdvanceTarget && mediaAdvanceHandler) {
+        mediaAdvanceTarget.removeEventListener('ended', mediaAdvanceHandler);
+      }
+      mediaAdvanceTarget = null;
+      mediaAdvanceHandler = null;
       if (mediaEl) {
         attemptAutoplay(mediaEl, questionMedia);
+        if (isWatchMode && mediaEl.tagName === 'VIDEO') {
+          mediaAdvanceHandler = () => {
+            if (!advancing) {
+              handleAnswerAdvance();
+            }
+          };
+          mediaAdvanceTarget = mediaEl;
+          mediaEl.addEventListener('ended', mediaAdvanceHandler, { once: true });
+        }
       }
       answerInput.value = answers[index] || '';
       answerInput.focus();
