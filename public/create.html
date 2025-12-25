@@ -37,7 +37,7 @@
         </label>
         <div class="bulk-card">
           <h3>Bulk add questions</h3>
-          <p class="muted">Paste one question per line using pipes: <code>Question | Answer | Other acceptable answers</code>.</p>
+          <p class="muted">Paste one question per line using pipes: <code>Question | Answer (optional) | Other acceptable answers</code>.</p>
           <textarea id="bulk-questions" rows="6" placeholder="What is the powerhouse of the cell? | Mitochondria | The mitochondrion"></textarea>
           <div class="cta-row">
             <button type="button" class="ghost" id="bulk-preview">Preview additions</button>
@@ -189,12 +189,12 @@
         .filter(Boolean);
 
       const parsed = lines.map((line) => {
-        const parts = line.split(/\|/).map((part) => part.trim()).filter(Boolean);
-        const [prompt, answer, ...alternates] = parts;
-        return { prompt, answer, alternateAnswers: alternates };
+        const parts = line.split(/\|/).map((part) => part.trim());
+        const [prompt, answer = '', ...alternates] = parts;
+        return { prompt, answer, alternateAnswers: alternates.filter(Boolean) };
       });
 
-      return parsed.filter((q) => q.prompt && q.answer);
+      return parsed.filter((q) => q.prompt);
     }
 
     function renderBulkPreview(questions) {
@@ -204,7 +204,8 @@
         const item = document.createElement('div');
         item.className = 'preview-item';
         const alternates = q.alternateAnswers.length ? ` | Variants: ${q.alternateAnswers.join(' || ')}` : '';
-        item.textContent = `${idx + 1}. ${q.prompt} → ${q.answer}${alternates}`;
+        const answerText = q.answer ? ` → ${q.answer}` : '';
+        item.textContent = `${idx + 1}. ${q.prompt}${answerText}${alternates}`;
         preview.appendChild(item);
       });
     }
@@ -231,7 +232,7 @@
       bulkError.textContent = '';
       const parsed = parseBulkQuestions(bulkInput.value);
       if (!parsed.length) {
-        bulkError.textContent = 'Enter at least one line with a question and answer separated by |';
+        bulkError.textContent = 'Enter at least one line with a question.';
         return;
       }
       renderBulkPreview(parsed);
@@ -241,7 +242,7 @@
       bulkError.textContent = '';
       const parsed = parseBulkQuestions(bulkInput.value);
       if (!parsed.length) {
-        bulkError.textContent = 'Enter at least one line with a question and answer separated by |';
+        bulkError.textContent = 'Enter at least one line with a question.';
         return;
       }
       appendBulkQuestions(parsed);
