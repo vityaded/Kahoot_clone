@@ -234,6 +234,12 @@
       toggleLeaderboard(false);
     });
 
+    socket.on('question:timeAdjusted', ({ duration, timeRemaining }) => {
+      const nextRemaining = Number.isFinite(timeRemaining) ? timeRemaining : duration;
+      if (!Number.isFinite(nextRemaining)) return;
+      startTimer(nextRemaining);
+    });
+
     socket.on('leaderboard:show', ({ leaderboard: board, duration }) => {
       hideOverlay();
     });

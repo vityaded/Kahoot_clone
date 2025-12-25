@@ -435,21 +435,32 @@ function pruneDisconnectedPlayers(sessionId) {
   emitLeaderboard(sessionId);
 }
 
+function normalizeQuestionDuration(raw) {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return null;
+  const clamped = Math.min(Math.max(Math.round(parsed), 5), 300);
+  return clamped;
+}
+
 function sanitizeQuestions(rawQuestions = [], { context } = {}) {
   const quizContext = String(context ?? '').trim();
   return rawQuestions
     .filter((q) => q && q.prompt)
-    .map((q) => ({
-      prompt: q.prompt.trim(),
-      answer: String(q.answer ?? '').trim(),
-      alternateAnswers: Array.isArray(q.alternateAnswers)
-        ? q.alternateAnswers.map((alt) => alt.trim()).filter(Boolean)
-        : [],
-      partialAnswers: Array.isArray(q.partialAnswers)
-        ? q.partialAnswers.map((alt) => alt.trim()).filter(Boolean)
-        : [],
-      media: buildMediaPayload(q.media),
-    }))
+    .map((q) => {
+      const duration = normalizeQuestionDuration(q.duration);
+      return {
+        prompt: q.prompt.trim(),
+        answer: String(q.answer ?? '').trim(),
+        alternateAnswers: Array.isArray(q.alternateAnswers)
+          ? q.alternateAnswers.map((alt) => alt.trim()).filter(Boolean)
+          : [],
+        partialAnswers: Array.isArray(q.partialAnswers)
+          ? q.partialAnswers.map((alt) => alt.trim()).filter(Boolean)
+          : [],
+        media: buildMediaPayload(q.media),
+        ...(duration ? { duration } : {}),
+      };
+    })
     .filter((q) => q.prompt && (q.answer || quizContext));
 }
 
@@ -1192,8 +1203,41 @@ io.on('connection', (socket) => {
     }
 
     session.questionDuration = parsed;
-    socket.emit('host:durationUpdated', { duration: parsed });
+    let timeRemaining = null;
+
+    if (session.questionActive && Number.isFinite(session.questionStart)) {
+      const currentIndex = session.currentQuestionIndex;
+      if (Number.isInteger(currentIndex) && session.questions?.[currentIndex]) {
+        session.questions[currentIndex].duration = parsed;
+      }
+      const elapsedMs = Date.now() - session.questionStart;
+      const remainingMs = parsed * 1000 - elapsedMs;
+      if (remainingMs <= 0) {
+        socket.emit('host:durationUpdated', { duration: parsed, timeRemaining: 0 });
+        io.to(`${QUIZ_ROOM_PREFIX}${quizId}`).emit('quiz:durationChanged', { duration: parsed });
+        endQuestion(session.id, { fastForward: true });
+        persistLiveSessions().catch((error) => {
+          /* eslint-disable no-console */
+          console.error('Failed to save live sessions', error);
+        });
+        return;
+      }
+
+      if (session.questionTimer) {
+        clearTimeout(session.questionTimer);
+      }
+      timeRemaining = Math.ceil(remainingMs / 1000);
+      session.questionTimer = setTimeout(() => endQuestion(session.id), remainingMs);
+    }
+
+    socket.emit('host:durationUpdated', { duration: parsed, timeRemaining });
     io.to(`${QUIZ_ROOM_PREFIX}${quizId}`).emit('quiz:durationChanged', { duration: parsed });
+    if (session.questionActive) {
+      io.to(`${QUIZ_ROOM_PREFIX}${quizId}`).emit('question:timeAdjusted', {
+        duration: parsed,
+        timeRemaining,
+      });
+    }
     persistLiveSessions().catch((error) => {
       /* eslint-disable no-console */
       console.error('Failed to save live sessions', error);

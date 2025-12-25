@@ -106,6 +106,11 @@
         <input type="number" id="duration-input" min="5" max="300" />
         <button type="button" id="update-duration" class="ghost">Update</button>
       </div>
+      <label class="inline-check">
+        <input type="checkbox" id="auto-duration" />
+        Automatic time adjustment
+      </label>
+      <p class="muted">20s base + 10s per word (excluding articles like “a”, “an”, and “the”).</p>
       <div id="countdown-banner" class="muted"></div>
     </div>
   </footer>
@@ -158,6 +163,7 @@
     const sessionCode = document.getElementById('session-code');
     const durationInput = document.getElementById('duration-input');
     const updateDurationBtn = document.getElementById('update-duration');
+    const autoDurationInput = document.getElementById('auto-duration');
     const overlay = document.getElementById('leaderboard-overlay');
     const overlayList = document.getElementById('overlay-leaderboard');
     const overlayHint = document.getElementById('overlay-hint');
@@ -184,6 +190,9 @@
     let currentDuration = 0;
     let baseTotalQuestions = 0;
     let runSettingsConfirmed = true;
+    let currentQuestionPrompt = '';
+
+    const ARTICLE_WORDS = new Set(['a', 'an', 'the']);
 
     function normalizeHostCode(raw) {
       const trimmed = raw?.trim();
@@ -474,6 +483,25 @@
       socket.emit('host:updateDuration', { quizId, duration: durationInput.value });
     });
 
+    function clampDuration(value) {
+      if (!Number.isFinite(value)) return 20;
+      return Math.min(Math.max(Math.round(value), 5), 300);
+    }
+
+    function calculateAutoDuration(prompt) {
+      const words = String(prompt ?? '').toLowerCase().match(/[a-z0-9']+/g) || [];
+      const wordCount = words.filter((word) => !ARTICLE_WORDS.has(word)).length;
+      return clampDuration(20 + wordCount * 10);
+    }
+
+    function applyAutoDuration(prompt) {
+      if (!quizId || !prompt) return;
+      const nextDuration = calculateAutoDuration(prompt);
+      if (nextDuration === currentDuration) return;
+      durationInput.value = nextDuration;
+      socket.emit('host:updateDuration', { quizId, duration: nextDuration });
+    }
+
     applyRunBtn.addEventListener('click', () => {
       if (!quizId) return;
       const count = Number.parseInt(runCountInput.value, 10);
@@ -504,6 +532,7 @@
     });
 
     socket.on('question:start', ({ prompt, index, total, duration, media }) => {
+      currentQuestionPrompt = prompt;
       questionStatus.textContent = `Question ${index}/${total}: ${prompt}`;
       startQuestionBtn.disabled = true;
       endQuestionBtn.disabled = false;
@@ -515,6 +544,8 @@
       setTimeout(() => questionStatus.classList.remove('active'), 500);
       stagePrompt.textContent = prompt;
       stageProgress.textContent = `Question ${index}/${total}`;
+      currentDuration = duration;
+      updateMeta(duration);
       stageTimer.textContent = `${duration}s`;
       stageChip.textContent = 'Question live';
       showMedia(media);
@@ -522,10 +553,25 @@
       hideOverlay();
       stopCountdownBanner();
       hostBody.classList.add('question-live');
+      if (autoDurationInput.checked) {
+        applyAutoDuration(prompt);
+      }
       document.querySelector('.host-stage').scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
 
+    socket.on('question:timeAdjusted', ({ duration, timeRemaining }) => {
+      if (!Number.isFinite(duration)) return;
+      durationInput.value = duration;
+      currentDuration = duration;
+      updateMeta(duration);
+      if (Number.isFinite(timeRemaining)) {
+        questionStatus.textContent = `Time adjusted: ${timeRemaining}s left.`;
+        countdown(timeRemaining);
+      }
+    });
+
     socket.on('question:end', ({ correctAnswer }) => {
+      currentQuestionPrompt = '';
       questionStatus.textContent = `Question ended. Correct answer: ${correctAnswer}`;
       startQuestionBtn.disabled = true;
       endQuestionBtn.disabled = true;
@@ -548,6 +594,7 @@
     });
 
     socket.on('quiz:finished', () => {
+      currentQuestionPrompt = '';
       questionStatus.textContent = 'Quiz complete! Share the leaderboard.';
       startQuestionBtn.disabled = true;
       endQuestionBtn.disabled = true;
@@ -563,6 +610,7 @@
     });
 
     socket.on('quiz:ended', () => {
+      currentQuestionPrompt = '';
       questionStatus.textContent = 'Quiz ended. Host disconnected or closed the game.';
       startQuestionBtn.disabled = true;
       endQuestionBtn.disabled = true;
@@ -579,6 +627,7 @@
     });
 
     socket.on('quiz:terminated', ({ reason }) => {
+      currentQuestionPrompt = '';
       questionStatus.textContent = reason === 'deleted' ? 'This quiz was deleted.' : 'Quiz ended.';
       startQuestionBtn.disabled = true;
       endQuestionBtn.disabled = true;
@@ -687,6 +736,12 @@
 
     qrOverlay.addEventListener('click', () => {
       qrOverlay.classList.add('hidden');
+    });
+
+    autoDurationInput.addEventListener('change', () => {
+      if (autoDurationInput.checked && currentQuestionPrompt) {
+        applyAutoDuration(currentQuestionPrompt);
+      }
     });
 
     loadHostCredentials();
