@@ -83,7 +83,7 @@
     const copyCodeBtn = document.getElementById('copy-code');
     const copyTemplateBtn = document.getElementById('copy-template');
 
-    function renderQuestionRow(index, prompt = '', answer = '', alternateAnswers = [], partialAnswers = []) {
+    function renderQuestionRow(index, prompt = '', answer = '', alternateAnswers = [], partialAnswers = [], gradingCondition = '') {
       const wrapper = document.createElement('div');
       wrapper.className = 'question-row media';
       wrapper.innerHTML = `
@@ -99,6 +99,9 @@
           </label>
           <label>Partial credit answers (synonyms or near-misses, use ||)
             <input type="text" name="partial" placeholder="Counts for half points (use || between options)" value="${partialAnswers.join(' || ')}" />
+          </label>
+          <label>LLM grading condition (optional)
+            <input type="text" name="grading-condition" placeholder="Use present continuous for the answer" value="${gradingCondition}" />
           </label>
         </div>
         <div class="media-picker">
@@ -156,6 +159,7 @@
         if (!answer.trim() && !context.trim()) {
           throw new Error(`Question ${index + 1} needs an expected answer or quiz context for LLM grading.`);
         }
+        const gradingCondition = row.querySelector('input[name="grading-condition"]').value.trim();
         const alternateRaw = row.querySelector('input[name="alternate"]').value;
         const partialRaw = row.querySelector('input[name="partial"]').value;
         const alternateAnswers = alternateRaw
@@ -177,7 +181,14 @@
           else if (file.type.startsWith('video/')) type = 'video';
           media = { type, name: file.name, src };
         }
-        questions.push({ prompt, answer, alternateAnswers, partialAnswers, media });
+        questions.push({
+          prompt,
+          answer,
+          alternateAnswers,
+          partialAnswers,
+          gradingCondition,
+          media,
+        });
       }
       return questions;
     }
@@ -218,6 +229,7 @@
           q.answer,
           q.alternateAnswers,
           q.partialAnswers,
+          q.gradingCondition,
         );
       });
       updateQuestionLabels();

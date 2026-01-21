@@ -176,6 +176,7 @@ export async function evaluateAnswer(question, submission, options = {}) {
     const llmResult = await judgeAnswerWithLlm({
       questionText: question?.prompt || '',
       context: context || question?.context || '',
+      gradingCondition: question?.gradingCondition || '',
       expectedAnswer: expectedAnswers.join(' | '),
       userAnswer: String(submission ?? ''),
     });
@@ -250,6 +251,7 @@ export async function evaluateAnswer(question, submission, options = {}) {
     const llmResult = await judgeAnswerWithLlm({
       questionText: question?.prompt || '',
       context: context || question?.context || '',
+      gradingCondition: question?.gradingCondition || '',
       expectedAnswer: expectedAnswers.join(' | '),
       userAnswer: String(submission ?? ''),
     });

@@ -448,6 +448,7 @@ function sanitizeQuestions(rawQuestions = [], { context } = {}) {
     .filter((q) => q && q.prompt)
     .map((q) => {
       const duration = normalizeQuestionDuration(q.duration);
+      const gradingCondition = String(q.gradingCondition ?? '').trim();
       return {
         prompt: q.prompt.trim(),
         answer: String(q.answer ?? '').trim(),
@@ -457,6 +458,7 @@ function sanitizeQuestions(rawQuestions = [], { context } = {}) {
         partialAnswers: Array.isArray(q.partialAnswers)
           ? q.partialAnswers.map((alt) => alt.trim()).filter(Boolean)
           : [],
+        gradingCondition,
         media: buildMediaPayload(q.media),
         ...(duration ? { duration } : {}),
       };
