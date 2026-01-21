@@ -143,6 +143,7 @@ export async function evaluateAnswer(question, submission, options = {}) {
     includeSpeedBonus = true,
     debug = false,
     context = '',
+    gradingCondition = '',
   } = options;
 
   const expectedAnswers = [question.answer, ...(question.alternateAnswers || [])].filter(Boolean);
@@ -176,6 +177,7 @@ export async function evaluateAnswer(question, submission, options = {}) {
     const llmResult = await judgeAnswerWithLlm({
       questionText: question?.prompt || '',
       context: context || question?.context || '',
+      gradingCondition,
       expectedAnswer: expectedAnswers.join(' | '),
       userAnswer: String(submission ?? ''),
     });
@@ -250,6 +252,7 @@ export async function evaluateAnswer(question, submission, options = {}) {
     const llmResult = await judgeAnswerWithLlm({
       questionText: question?.prompt || '',
       context: context || question?.context || '',
+      gradingCondition,
       expectedAnswer: expectedAnswers.join(' | '),
       userAnswer: String(submission ?? ''),
     });
@@ -292,6 +295,7 @@ export async function scoreSubmission(questions = [], submissions = [], options 
     timeRemainingMs = null,
     includeSpeedBonus = true,
     context = '',
+    gradingCondition = '',
   } = options;
   let score = 0;
   const responses = [];
@@ -307,6 +311,7 @@ export async function scoreSubmission(questions = [], submissions = [], options 
       timeRemainingMs: getRemaining(i),
       includeSpeedBonus,
       context,
+      gradingCondition,
     });
 
     score += evaluation.earned;

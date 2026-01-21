@@ -133,6 +133,7 @@ app.post('/api/test-evaluate', async (req, res) => {
   const submission = String(req.body?.submission ?? '').trim();
   const alternateAnswers = Array.isArray(req.body?.alternateAnswers) ? req.body.alternateAnswers : [];
   const partialAnswers = Array.isArray(req.body?.partialAnswers) ? req.body.partialAnswers : [];
+  const gradingCondition = String(req.body?.gradingCondition ?? '').trim();
 
   if (!answer || !submission) {
     res.status(400).json({ error: 'Answer and submission are required.' });
@@ -146,7 +147,11 @@ app.post('/api/test-evaluate', async (req, res) => {
       alternateAnswers: alternateAnswers.map((entry) => String(entry ?? '').trim()).filter(Boolean),
       partialAnswers: partialAnswers.map((entry) => String(entry ?? '').trim()).filter(Boolean),
     };
-    const evaluation = await evaluateAnswer(question, submission, { includeSpeedBonus: false, debug: true });
+    const evaluation = await evaluateAnswer(question, submission, {
+      includeSpeedBonus: false,
+      debug: true,
+      gradingCondition,
+    });
 
     res.json({
       evaluation,
@@ -209,6 +214,7 @@ function serializeForStorage() {
     questionDuration: quiz.questionDuration,
     createdAt: quiz.createdAt,
     context: quiz.context || '',
+    gradingCondition: quiz.gradingCondition || '',
     source: quiz.source || null,
   }));
 }
@@ -230,6 +236,7 @@ async function loadPersistedQuizzes() {
         questionDuration: Number(quiz.questionDuration) || 20,
         createdAt: quiz.createdAt || Date.now(),
         context: String(quiz.context ?? '').trim(),
+        gradingCondition: String(quiz.gradingCondition ?? '').trim(),
         source: quiz.source || null,
       });
     });
@@ -318,6 +325,7 @@ function serializeLiveSessions() {
     runSettingsConfirmed: session.runSettingsConfirmed,
     questions: session.questions,
     context: session.context || '',
+    gradingCondition: session.gradingCondition || '',
     players: Array.from(session.players.values()).map((player) => ({
       id: player.id,
       name: player.name,
@@ -374,6 +382,7 @@ async function loadPersistedLiveSessions() {
           : template.questions.length <= 10,
         questionDuration: Number(entry.questionDuration) || template.questionDuration,
         context: String(entry.context ?? template.context ?? '').trim(),
+        gradingCondition: String(entry.gradingCondition ?? template.gradingCondition ?? '').trim(),
         currentQuestionIndex: Number.isInteger(entry.currentQuestionIndex) ? entry.currentQuestionIndex : -1,
         questionStart: null,
         answers: new Set(Array.isArray(entry.answers) ? entry.answers : []),
@@ -473,7 +482,7 @@ function collectMediaSrcsFromQuestions(questions = []) {
   return out;
 }
 
-function createQuizTemplate({ title, questions, questionDuration, context = '', sourceMeta = null }) {
+function createQuizTemplate({ title, questions, questionDuration, context = '', gradingCondition = '', sourceMeta = null }) {
   const sanitizedQuestions = sanitizeQuestions(questions, { context });
   if (!sanitizedQuestions.length) {
     return null;
@@ -491,6 +500,7 @@ function createQuizTemplate({ title, questions, questionDuration, context = '', 
     questionDuration: Number(questionDuration) || 20,
     createdAt: Date.now(),
     context: String(context ?? '').trim(),
+    gradingCondition: String(gradingCondition ?? '').trim(),
   };
 
   if (sourceMeta) {
@@ -546,6 +556,7 @@ async function evaluateHomeworkSubmission(session, answers = []) {
   const evaluation = await scoreSubmission(template.questions, Array.isArray(answers) ? answers : [], {
     includeSpeedBonus: false,
     context: template.context,
+    gradingCondition: template.gradingCondition,
   });
   return evaluation;
 }
@@ -700,6 +711,7 @@ function createSessionFromTemplate(template, hostId = null) {
     runSettingsConfirmed: template.questions.length <= 10,
     questionDuration: template.questionDuration,
     context: String(template.context ?? '').trim(),
+    gradingCondition: String(template.gradingCondition ?? '').trim(),
     currentQuestionIndex: -1,
     questionStart: null,
     answers: new Set(),
@@ -875,13 +887,13 @@ await loadPersistedHomeworkSessions();
 await loadPersistedLiveSessions();
 
 io.on('connection', (socket) => {
-  socket.on('host:createQuiz', ({ title, questions, questionDuration, context }) => {
+  socket.on('host:createQuiz', ({ title, questions, questionDuration, context, gradingCondition }) => {
     try {
       if (!Array.isArray(questions) || questions.length === 0) {
         socket.emit('host:error', 'Please add at least one question.');
         return;
       }
-      const template = createQuizTemplate({ title, questions, questionDuration, context });
+      const template = createQuizTemplate({ title, questions, questionDuration, context, gradingCondition });
       if (!template) {
         socket.emit('host:error', 'Each question needs a prompt and either an expected answer or quiz context.');
         return;
@@ -1152,6 +1164,7 @@ io.on('connection', (socket) => {
       timeRemainingMs: timeRemaining,
       includeSpeedBonus: true,
       context: session.context,
+      gradingCondition: session.gradingCondition,
     });
 
     player.score += evaluation.earned;
@@ -1454,6 +1467,7 @@ app.post('/api/homework/:homeworkId/evaluate', async (req, res) => {
   const evaluation = await evaluateAnswer(question, answer, {
     includeSpeedBonus: false,
     context: template?.context || '',
+    gradingCondition: template?.gradingCondition || '',
   });
 
   res.json({

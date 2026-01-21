@@ -47,6 +47,7 @@ export function getLlmConfidenceThreshold() {
 export async function judgeAnswerWithLlm({
   questionText,
   context,
+  gradingCondition,
   expectedAnswer,
   userAnswer,
   strictness = STRICTNESS,
@@ -56,7 +57,13 @@ export async function judgeAnswerWithLlm({
   }
 
   const systemPrompt = buildJudgeSystemPrompt(strictness);
-  const userPrompt = buildJudgeUserPrompt({ questionText, context, expectedAnswer, userAnswer });
+  const userPrompt = buildJudgeUserPrompt({
+    questionText,
+    context,
+    gradingCondition,
+    expectedAnswer,
+    userAnswer,
+  });
 
   const attempts = [];
 
@@ -269,7 +276,7 @@ function buildJudgeSystemPrompt(strictness) {
   ].join('\n');
 }
 
-function buildJudgeUserPrompt({ questionText, context, expectedAnswer, userAnswer }) {
+function buildJudgeUserPrompt({ questionText, context, gradingCondition, expectedAnswer, userAnswer }) {
   const lines = [
     'Judge the user answer against the expected answer.',
     '',
@@ -279,6 +286,11 @@ function buildJudgeUserPrompt({ questionText, context, expectedAnswer, userAnswe
   if (context) {
     lines.push(`CONTEXT: ${String(context || '')}`);
     lines.push('Use the context to judge correctness when the expected answer is blank or incomplete.');
+  }
+
+  if (gradingCondition) {
+    lines.push(`GRADING CONDITION: ${String(gradingCondition || '')}`);
+    lines.push('The user answer must satisfy this condition to be marked correct.');
   }
 
   lines.push(`EXPECTED: ${String(expectedAnswer || '')}`);

@@ -35,6 +35,10 @@
           LLM grading context (optional)
           <textarea id="quiz-context" rows="6" placeholder="Add rubric notes or background context the LLM should use to grade answers."></textarea>
         </label>
+        <label>
+          LLM grading condition (optional)
+          <input type="text" id="quiz-grading-condition" placeholder="Use present continuous for the answer" />
+        </label>
         <div class="bulk-card">
           <h3>Bulk add questions</h3>
           <p class="muted">Paste one question per line using pipes: <code>Question | Answer (optional) | Other acceptable answers</code>.</p>
@@ -177,7 +181,13 @@
           else if (file.type.startsWith('video/')) type = 'video';
           media = { type, name: file.name, src };
         }
-        questions.push({ prompt, answer, alternateAnswers, partialAnswers, media });
+        questions.push({
+          prompt,
+          answer,
+          alternateAnswers,
+          partialAnswers,
+          media,
+        });
       }
       return questions;
     }
@@ -261,12 +271,14 @@
         const questions = await buildQuestions(context);
         const title = document.getElementById('quiz-title').value;
         const questionDuration = document.getElementById('question-duration').value;
+        const gradingCondition = document.getElementById('quiz-grading-condition').value;
 
         socket.emit('host:createQuiz', {
           title,
           questions,
           questionDuration,
           context,
+          gradingCondition,
         });
       } catch (error) {
         formError.textContent = error?.message || 'Unable to build quiz questions.';
