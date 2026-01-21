@@ -516,6 +516,29 @@ function createQuizTemplate({ title, questions, questionDuration, context = '', 
   return template;
 }
 
+function updateQuizTemplate(quizId, { title, questions, questionDuration, context = '', gradingCondition = '' }) {
+  const template = quizTemplates.get(quizId);
+  if (!template) return null;
+
+  const sanitizedQuestions = sanitizeQuestions(questions, { context });
+  if (!sanitizedQuestions.length) {
+    return { error: 'Each question needs a prompt and either an expected answer or quiz context.' };
+  }
+
+  template.title = title?.trim() || 'Classroom Quiz';
+  template.questions = sanitizedQuestions;
+  template.questionDuration = Number(questionDuration) || 20;
+  template.context = String(context ?? '').trim();
+  template.gradingCondition = String(gradingCondition ?? '').trim();
+
+  persistQuizzes().catch((error) => {
+    /* eslint-disable no-console */
+    console.error('Failed to save quiz edits to disk', error);
+  });
+
+  return template;
+}
+
 function createHomeworkSession(template, { dueAt = null } = {}) {
   const questions = template.questions.map((question) => {
     const text = question.answer?.trim() || question.prompt?.trim() || '';
@@ -1334,6 +1357,25 @@ app.get('/api/quizzes/:quizId', (req, res) => {
   });
 });
 
+app.get('/api/quizzes/:quizId/template', (req, res) => {
+  const quizId = req.params.quizId?.trim()?.toUpperCase();
+  const quiz = quizTemplates.get(quizId);
+  if (!quiz) {
+    res.status(404).json({ error: 'Quiz not found' });
+    return;
+  }
+
+  res.json({
+    id: quiz.id,
+    title: quiz.title,
+    questions: quiz.questions,
+    questionDuration: quiz.questionDuration,
+    createdAt: quiz.createdAt,
+    context: quiz.context || '',
+    gradingCondition: quiz.gradingCondition || '',
+  });
+});
+
 app.get('/api/quizzes', (_req, res) => {
   const payload = Array.from(quizTemplates.values())
     .map((quiz) => ({
@@ -1345,6 +1387,44 @@ app.get('/api/quizzes', (_req, res) => {
     .sort((a, b) => b.createdAt - a.createdAt);
 
   res.json(payload);
+});
+
+app.put('/api/quizzes/:quizId', (req, res) => {
+  const quizId = req.params.quizId?.trim()?.toUpperCase();
+  const quiz = quizTemplates.get(quizId);
+  if (!quiz) {
+    res.status(404).json({ error: 'Quiz not found' });
+    return;
+  }
+
+  const questions = Array.isArray(req.body?.questions) ? req.body.questions : null;
+  if (!questions) {
+    res.status(400).json({ error: 'Questions are required.' });
+    return;
+  }
+
+  const updated = updateQuizTemplate(quizId, {
+    title: req.body?.title,
+    questions,
+    questionDuration: req.body?.questionDuration,
+    context: req.body?.context,
+    gradingCondition: req.body?.gradingCondition,
+  });
+
+  if (updated?.error) {
+    res.status(400).json({ error: updated.error });
+    return;
+  }
+
+  res.json({
+    id: updated.id,
+    title: updated.title,
+    questionCount: updated.questions.length,
+    questionDuration: updated.questionDuration,
+    createdAt: updated.createdAt,
+    context: updated.context || '',
+    gradingCondition: updated.gradingCondition || '',
+  });
 });
 
 app.delete('/api/quizzes/:quizId', async (req, res) => {

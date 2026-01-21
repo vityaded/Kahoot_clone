@@ -86,8 +86,40 @@
     const runLink = document.getElementById('run-link');
     const copyCodeBtn = document.getElementById('copy-code');
     const copyTemplateBtn = document.getElementById('copy-template');
+    const pageTitle = document.querySelector('title');
+    const headerTitle = document.querySelector('header h1');
+    const headerCopy = document.querySelector('header p');
+    const submitButton = form.querySelector('button[type="submit"]');
+    const questionDurationInput = document.getElementById('question-duration');
+    const titleInput = document.getElementById('quiz-title');
+    const contextInput = document.getElementById('quiz-context');
+    const gradingConditionInput = document.getElementById('quiz-grading-condition');
+    const params = new URLSearchParams(window.location.search);
+    const editQuizId = params.get('quizId')?.trim()?.toUpperCase();
+    const isEditMode = Boolean(editQuizId);
 
-    function renderQuestionRow(index, prompt = '', answer = '', alternateAnswers = [], partialAnswers = []) {
+    if (isEditMode) {
+      pageTitle.textContent = 'Edit Quiz';
+      headerTitle.textContent = 'Edit your quiz';
+      headerCopy.textContent = 'Update prompts, answers, and grading rules for this quiz template.';
+      submitButton.textContent = 'Save changes';
+      quizCodeEl.textContent = `Editing quiz ${editQuizId}...`;
+    }
+
+    function renderMediaPreview(preview, media) {
+      if (!media?.src) return;
+      if (media.type === 'image') {
+        preview.innerHTML = `<img src="${media.src}" alt="${media.name || 'Media preview'}" />`;
+      } else if (media.type === 'audio') {
+        preview.innerHTML = `<audio controls src="${media.src}"></audio>`;
+      } else if (media.type === 'video') {
+        preview.innerHTML = `<video controls src="${media.src}"></video>`;
+      } else {
+        preview.textContent = media.name || 'Attached media';
+      }
+    }
+
+    function renderQuestionRow(index, prompt = '', answer = '', alternateAnswers = [], partialAnswers = [], media = null) {
       const wrapper = document.createElement('div');
       wrapper.className = 'question-row media';
       wrapper.innerHTML = `
@@ -110,6 +142,7 @@
             <input type="file" accept="image/*,audio/*,video/*" name="media" />
           </label>
           <div class="preview" aria-live="polite"></div>
+          <button type="button" class="ghost clear-media">Remove media</button>
         </div>
         <button type="button" class="ghost remove">Remove</button>
       `;
@@ -117,10 +150,13 @@
         wrapper.remove();
         updateQuestionLabels();
       });
-      wrapper.querySelector('input[name="media"]').addEventListener('change', (event) => {
-        const preview = wrapper.querySelector('.preview');
+      const mediaInput = wrapper.querySelector('input[name="media"]');
+      const preview = wrapper.querySelector('.preview');
+      const clearMediaBtn = wrapper.querySelector('.clear-media');
+      mediaInput.addEventListener('change', (event) => {
         preview.innerHTML = '';
         const file = event.target.files?.[0];
+        wrapper.dataset.existingMedia = '';
         if (!file) return;
         const type = file.type;
         if (type.startsWith('image/')) {
@@ -133,6 +169,15 @@
           preview.textContent = file.name;
         }
       });
+      clearMediaBtn.addEventListener('click', () => {
+        mediaInput.value = '';
+        wrapper.dataset.existingMedia = '';
+        preview.innerHTML = '';
+      });
+      if (media) {
+        wrapper.dataset.existingMedia = JSON.stringify(media);
+        renderMediaPreview(preview, media);
+      }
       questionList.appendChild(wrapper);
     }
 
@@ -180,6 +225,12 @@
           else if (file.type.startsWith('audio/')) type = 'audio';
           else if (file.type.startsWith('video/')) type = 'video';
           media = { type, name: file.name, src };
+        } else if (row.dataset.existingMedia) {
+          try {
+            media = JSON.parse(row.dataset.existingMedia);
+          } catch (error) {
+            media = null;
+          }
         }
         questions.push({
           prompt,
@@ -265,21 +316,40 @@
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       formError.textContent = '';
-      quizCodeEl.textContent = 'Creating quiz...';
+      quizCodeEl.textContent = isEditMode ? 'Saving changes...' : 'Creating quiz...';
       try {
-        const context = document.getElementById('quiz-context').value;
+        const context = contextInput.value;
         const questions = await buildQuestions(context);
-        const title = document.getElementById('quiz-title').value;
-        const questionDuration = document.getElementById('question-duration').value;
-        const gradingCondition = document.getElementById('quiz-grading-condition').value;
+        const title = titleInput.value;
+        const questionDuration = questionDurationInput.value;
+        const gradingCondition = gradingConditionInput.value;
 
-        socket.emit('host:createQuiz', {
-          title,
-          questions,
-          questionDuration,
-          context,
-          gradingCondition,
-        });
+        if (isEditMode) {
+          const response = await fetch(`/api/quizzes/${editQuizId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              title,
+              questions,
+              questionDuration,
+              context,
+              gradingCondition,
+            }),
+          });
+          if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            throw new Error(data.error || 'Unable to save quiz changes.');
+          }
+          quizCodeEl.textContent = `Saved changes to quiz ${editQuizId}.`;
+        } else {
+          socket.emit('host:createQuiz', {
+            title,
+            questions,
+            questionDuration,
+            context,
+            gradingCondition,
+          });
+        }
       } catch (error) {
         formError.textContent = error?.message || 'Unable to build quiz questions.';
         quizCodeEl.textContent = 'Waiting for quiz...';
@@ -315,7 +385,44 @@
       setTimeout(() => { copyTemplateBtn.textContent = 'Copy template code'; }, 1200);
     });
 
-    renderQuestionRow(0);
+    async function loadQuizForEdit() {
+      try {
+        const response = await fetch(`/api/quizzes/${editQuizId}/template`);
+        if (!response.ok) {
+          throw new Error('Unable to load quiz for editing.');
+        }
+        const data = await response.json();
+        questionList.innerHTML = '';
+        titleInput.value = data.title || '';
+        questionDurationInput.value = data.questionDuration || 20;
+        contextInput.value = data.context || '';
+        gradingConditionInput.value = data.gradingCondition || '';
+        (data.questions || []).forEach((question, index) => {
+          renderQuestionRow(
+            index,
+            question.prompt || '',
+            question.answer || '',
+            question.alternateAnswers || [],
+            question.partialAnswers || [],
+            question.media || null,
+          );
+        });
+        if (!questionList.children.length) {
+          renderQuestionRow(0);
+        }
+      } catch (error) {
+        formError.textContent = error?.message || 'Unable to load quiz for editing.';
+        if (!questionList.children.length) {
+          renderQuestionRow(0);
+        }
+      }
+    }
+
+    if (isEditMode) {
+      loadQuizForEdit();
+    } else {
+      renderQuestionRow(0);
+    }
   </script>
 </body>
 </html>
