@@ -35,6 +35,10 @@
           LLM grading context (optional)
           <textarea id="quiz-context" rows="6" placeholder="Add rubric notes or background context the LLM should use to grade answers."></textarea>
         </label>
+        <label>
+          LLM grading condition (optional)
+          <input type="text" id="quiz-grading-condition" placeholder="Use present continuous for the answer" />
+        </label>
         <div class="bulk-card">
           <h3>Bulk add questions</h3>
           <p class="muted">Paste one question per line using pipes: <code>Question | Answer (optional) | Other acceptable answers</code>.</p>
@@ -83,7 +87,7 @@
     const copyCodeBtn = document.getElementById('copy-code');
     const copyTemplateBtn = document.getElementById('copy-template');
 
-    function renderQuestionRow(index, prompt = '', answer = '', alternateAnswers = [], partialAnswers = [], gradingCondition = '') {
+    function renderQuestionRow(index, prompt = '', answer = '', alternateAnswers = [], partialAnswers = []) {
       const wrapper = document.createElement('div');
       wrapper.className = 'question-row media';
       wrapper.innerHTML = `
@@ -99,9 +103,6 @@
           </label>
           <label>Partial credit answers (synonyms or near-misses, use ||)
             <input type="text" name="partial" placeholder="Counts for half points (use || between options)" value="${partialAnswers.join(' || ')}" />
-          </label>
-          <label>LLM grading condition (optional)
-            <input type="text" name="grading-condition" placeholder="Use present continuous for the answer" value="${gradingCondition}" />
           </label>
         </div>
         <div class="media-picker">
@@ -159,7 +160,6 @@
         if (!answer.trim() && !context.trim()) {
           throw new Error(`Question ${index + 1} needs an expected answer or quiz context for LLM grading.`);
         }
-        const gradingCondition = row.querySelector('input[name="grading-condition"]').value.trim();
         const alternateRaw = row.querySelector('input[name="alternate"]').value;
         const partialRaw = row.querySelector('input[name="partial"]').value;
         const alternateAnswers = alternateRaw
@@ -186,7 +186,6 @@
           answer,
           alternateAnswers,
           partialAnswers,
-          gradingCondition,
           media,
         });
       }
@@ -229,7 +228,6 @@
           q.answer,
           q.alternateAnswers,
           q.partialAnswers,
-          q.gradingCondition,
         );
       });
       updateQuestionLabels();
@@ -273,12 +271,14 @@
         const questions = await buildQuestions(context);
         const title = document.getElementById('quiz-title').value;
         const questionDuration = document.getElementById('question-duration').value;
+        const gradingCondition = document.getElementById('quiz-grading-condition').value;
 
         socket.emit('host:createQuiz', {
           title,
           questions,
           questionDuration,
           context,
+          gradingCondition,
         });
       } catch (error) {
         formError.textContent = error?.message || 'Unable to build quiz questions.';
