@@ -153,6 +153,7 @@ export async function evaluateAnswer(question, submission, options = {}) {
   const cfg = getRuleMatchingConfig();
   let llmAlreadyTried = false;
   let llmDecided = false;
+  let llmSuggestedAnswer = '';
   const evaluationLog = [];
 
   const log = (message, details = null) => {
@@ -198,6 +199,10 @@ export async function evaluateAnswer(question, submission, options = {}) {
     } else if (llmVerdict === 'BAD' && llmConfidence >= threshold) {
       judgedBy = 'llm';
       llmDecided = true;
+      llmSuggestedAnswer = llmResult?.suggestedAnswer || '';
+      if (llmSuggestedAnswer) {
+        log('LLM primary suggested correction.', { suggestedAnswer: llmSuggestedAnswer });
+      }
       log('LLM primary verdict accepted as wrong.');
     }
   }
@@ -267,6 +272,11 @@ export async function evaluateAnswer(question, submission, options = {}) {
       isPartial = true;
       judgedBy = 'llm';
       log('LLM fallback verdict accepted as partial.');
+    } else if (llmVerdict === 'BAD' && (llmResult.confidence ?? 0) >= threshold) {
+      llmSuggestedAnswer = llmResult?.suggestedAnswer || '';
+      if (llmSuggestedAnswer) {
+        log('LLM fallback suggested correction.', { suggestedAnswer: llmSuggestedAnswer });
+      }
     }
   }
 
@@ -283,6 +293,9 @@ export async function evaluateAnswer(question, submission, options = {}) {
     playerAnswer: submission ?? '',
     judgedBy,
   };
+  if (!isCorrect && !isPartial && llmSuggestedAnswer) {
+    result.suggestedAnswer = llmSuggestedAnswer;
+  }
   if (debug) {
     result.evaluationLog = evaluationLog;
   }
