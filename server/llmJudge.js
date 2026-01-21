@@ -43,7 +43,7 @@ export function getLlmConfidenceThreshold() {
 }
 
 // Main entry: judge a user answer vs expected answer, returns:
-// { verdict: "GOOD"|"ALMOST"|"BAD", confidence: number, reason: string }
+// { verdict: "GOOD"|"ALMOST"|"BAD", confidence: number, reason: string, suggestedAnswer?: string }
 export async function judgeAnswerWithLlm({
   questionText,
   context,
@@ -75,6 +75,7 @@ export async function judgeAnswerWithLlm({
       const verdict = String(json?.verdict || '').toUpperCase();
       const confidence = clamp01(Number(json?.confidence));
       const reason = String(json?.reason || '').trim();
+      const suggestedAnswer = String(json?.suggestedAnswer || '').trim();
 
       if (!['GOOD', 'ALMOST', 'BAD'].includes(verdict)) {
         throw new Error(`Invalid verdict from LLM: ${verdict}`);
@@ -83,7 +84,7 @@ export async function judgeAnswerWithLlm({
         throw new Error(`Invalid confidence from LLM: ${json?.confidence}`);
       }
 
-      return { verdict, confidence, reason };
+      return { verdict, confidence, reason, suggestedAnswer };
     } catch (err) {
       attempts.push({ provider, error: String(err?.message || err) });
     }
@@ -263,10 +264,11 @@ function buildJudgeSystemPrompt(strictness) {
   // Keep this simple; strict JSON is enforced by extractor/parser.
   return [
     'You are an answer judge for a quiz system.',
-    'Return ONLY a JSON object with keys: verdict, confidence, reason.',
+    'Return ONLY a JSON object with keys: verdict, confidence, reason, suggestedAnswer.',
     'verdict must be one of: GOOD, ALMOST, BAD.',
     'confidence must be a number between 0 and 1.',
     'reason must be short.',
+    'suggestedAnswer must be empty unless verdict is BAD; when BAD, provide the best correct answer.',
     '',
     `Strictness level: ${s}.`,
     'Rules:',
