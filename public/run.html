@@ -30,6 +30,7 @@
         <p class="eyebrow">Question display</p>
         <h1 id="stage-prompt">Launch a question to project it here.</h1>
         <div id="stage-media" class="stage-media"></div>
+        <div id="stage-options" class="stage-options hidden"></div>
       </div>
     </section>
 
@@ -156,6 +157,7 @@
     const mediaPreview = document.getElementById('media-preview');
     const stagePrompt = document.getElementById('stage-prompt');
     const stageMedia = document.getElementById('stage-media');
+    const stageOptions = document.getElementById('stage-options');
     const stageProgress = document.getElementById('stage-progress');
     const stageTimer = document.getElementById('stage-timer');
     const stageChip = document.getElementById('stage-chip');
@@ -252,7 +254,8 @@
       leaderboardList.innerHTML = '';
       players.forEach((player, index) => {
         const item = document.createElement('li');
-        item.innerHTML = `<span>${index + 1}. ${player.name}</span><span>${player.score} pts</span>`;
+        const correctCount = Number(player.correctCount) || 0;
+        item.innerHTML = `<span>${index + 1}. ${player.name}</span><span>${player.score} pts · ${correctCount} correct</span>`;
         leaderboardList.appendChild(item);
       });
       playerCount.textContent = `${players.length} player${players.length === 1 ? '' : 's'}`;
@@ -389,6 +392,22 @@
       if (stageEl && media?.type !== 'image') {
         attemptAutoplay(stageEl, stageMedia);
       }
+    }
+
+    function renderStageOptions(type, options = []) {
+      stageOptions.innerHTML = '';
+      const isMultiple = type === 'multiple';
+      if (!isMultiple || !Array.isArray(options) || options.length === 0) {
+        stageOptions.classList.add('hidden');
+        return;
+      }
+      stageOptions.classList.remove('hidden');
+      options.forEach((option) => {
+        const item = document.createElement('div');
+        item.className = 'stage-option';
+        item.textContent = option;
+        stageOptions.appendChild(item);
+      });
     }
 
     claimForm.addEventListener('submit', (event) => {
@@ -531,7 +550,7 @@
       updateMeta();
     });
 
-    socket.on('question:start', ({ prompt, index, total, duration, media }) => {
+    socket.on('question:start', ({ prompt, index, total, duration, media, type, options }) => {
       currentQuestionPrompt = prompt;
       questionStatus.textContent = `Question ${index}/${total}: ${prompt}`;
       startQuestionBtn.disabled = true;
@@ -549,6 +568,7 @@
       stageTimer.textContent = `${duration}s`;
       stageChip.textContent = 'Question live';
       showMedia(media);
+      renderStageOptions(type, options);
       countdown(duration);
       hideOverlay();
       stopCountdownBanner();
@@ -581,6 +601,8 @@
       stopMedia(mediaPreview);
       mediaPreview.innerHTML = '';
       stageMedia.innerHTML = '';
+      stageOptions.innerHTML = '';
+      stageOptions.classList.add('hidden');
       stageTimer.textContent = '--';
       stageProgress.textContent = 'Waiting for next question';
       stagePrompt.textContent = correctAnswer ? `Answer: ${correctAnswer}` : 'Waiting for next question';
@@ -602,6 +624,8 @@
       loopAudio.pause();
       stopMedia(stageMedia);
       stopMedia(mediaPreview);
+      stageOptions.innerHTML = '';
+      stageOptions.classList.add('hidden');
       stagePrompt.textContent = 'Quiz complete!';
       stageProgress.textContent = 'Finished';
       stageTimer.textContent = '--';
@@ -619,6 +643,8 @@
       stopMedia(mediaPreview);
       mediaPreview.innerHTML = '';
       stageMedia.innerHTML = '';
+      stageOptions.innerHTML = '';
+      stageOptions.classList.add('hidden');
       stagePrompt.textContent = 'Quiz ended. Reclaim control to restart.';
       stageProgress.textContent = 'Disconnected';
       stageTimer.textContent = '--';
@@ -636,6 +662,8 @@
       stopMedia(mediaPreview);
       mediaPreview.innerHTML = '';
       stageMedia.innerHTML = '';
+      stageOptions.innerHTML = '';
+      stageOptions.classList.add('hidden');
       stagePrompt.textContent = 'Session closed.';
       stageProgress.textContent = 'Closed';
       stageTimer.textContent = '--';
@@ -698,7 +726,8 @@
       overlayList.innerHTML = '';
       players.forEach((player, index) => {
         const item = document.createElement('li');
-        item.innerHTML = `<span>${index + 1}. ${player.name}</span><span>${player.score} pts</span>`;
+        const correctCount = Number(player.correctCount) || 0;
+        item.innerHTML = `<span>${index + 1}. ${player.name}</span><span>${player.score} pts · ${correctCount} correct</span>`;
         overlayList.appendChild(item);
       });
       overlay.classList.remove('hidden');

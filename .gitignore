@@ -1,7 +1,50 @@
-node_modules
+# Dependencies
+node_modules/
+
+# Logs
+logs/
+*.log
 npm-debug.log*
-.DS_Store
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Runtime artifacts
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage / test output
+coverage/
+.nyc_output/
+
+# Build output
+dist/
+build/
+out/
+
+# Tool caches
+.cache/
+.eslintcache
+.stylelintcache
+.parcel-cache/
+.turbo/
+
+# App data (generated at runtime)
 data/
+
+# Environment variables
 .env
 .env.*
 !.env.example
+
+# OS / editor files
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo

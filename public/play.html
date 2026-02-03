@@ -41,6 +41,11 @@
         <button type="submit">Submit answer</button>
       </form>
 
+      <div id="choice-form" class="answer-card hidden">
+        <p class="eyebrow">Choose an option</p>
+        <div id="choice-grid" class="choice-grid"></div>
+      </div>
+
       <div class="card leaderboard-card" id="leaderboard-card">
         <div class="leaderboard-header">
           <h2>Leaderboard</h2>
@@ -75,6 +80,8 @@
     const answerForm = document.getElementById('answer-form');
     const answerInput = document.getElementById('answer-input');
     const submitButton = answerForm.querySelector('button');
+    const choiceForm = document.getElementById('choice-form');
+    const choiceGrid = document.getElementById('choice-grid');
     const answerFeedback = document.getElementById('answer-feedback');
     const leaderboard = document.getElementById('leaderboard');
     const questionMedia = document.getElementById('question-media');
@@ -95,6 +102,80 @@
       answerInput.setAttribute('autocapitalize', 'off');
       answerInput.setAttribute('autocorrect', 'off');
       answerInput.setAttribute('spellcheck', 'false');
+    }
+
+    function normalizeChoiceValue(value) {
+      return String(value ?? '').trim();
+    }
+
+    function clearChoiceFeedback() {
+      choiceGrid.querySelectorAll('.choice-button').forEach((button) => {
+        button.classList.remove('selected', 'correct', 'incorrect');
+      });
+    }
+
+    function renderChoiceButtons(options = []) {
+      choiceGrid.innerHTML = '';
+      const list = Array.isArray(options) ? options : [];
+      if (!list.length) return;
+      list.forEach((option) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'choice-button';
+        button.textContent = option;
+        button.dataset.option = option;
+        button.addEventListener('click', () => submitChoice(option));
+        choiceGrid.appendChild(button);
+      });
+    }
+
+    function markSelectedChoice(option) {
+      choiceGrid.querySelectorAll('.choice-button').forEach((button) => {
+        button.classList.toggle('selected', button.textContent === option);
+      });
+    }
+
+    function revealChoiceResult(correctAnswer, playerAnswer) {
+      const normalizedCorrect = normalizeChoiceValue(correctAnswer);
+      const normalizedPlayer = normalizeChoiceValue(playerAnswer);
+      if (!normalizedCorrect) return;
+      choiceGrid.querySelectorAll('.choice-button').forEach((button) => {
+        const optionValue = normalizeChoiceValue(button.dataset.option || button.textContent);
+        if (!optionValue) return;
+        if (optionValue === normalizedCorrect) {
+          button.classList.add('correct');
+        } else if (normalizedPlayer && optionValue === normalizedPlayer) {
+          button.classList.add('incorrect');
+        }
+      });
+    }
+
+    function submitChoice(option) {
+      if (!currentQuizId || playerHasAnswered) return;
+      setAnswerWaiting(true);
+      socket.emit('player:answer', {
+        quizId: currentQuizId,
+        answer: option,
+      });
+      lastSubmittedAnswer = option;
+      playerHasAnswered = true;
+      answerFeedback.textContent = '';
+      answerFeedback.className = '';
+      markSelectedChoice(option);
+    }
+
+    function showAnswerMode(type, options = []) {
+      currentQuestionType = type === 'multiple' ? 'multiple' : 'open';
+      if (currentQuestionType === 'multiple') {
+        answerForm.classList.add('hidden');
+        choiceForm.classList.remove('hidden');
+        clearChoiceFeedback();
+        renderChoiceButtons(options);
+      } else {
+        choiceForm.classList.add('hidden');
+        choiceGrid.innerHTML = '';
+        answerForm.classList.remove('hidden');
+      }
     }
 
     const playerIdFromStorage = localStorage.getItem('playerId');
@@ -120,6 +201,7 @@
     let baseViewportHeight = window.visualViewport?.height || window.innerHeight;
     let lastSubmittedAnswer = '';
     let playerHasAnswered = false;
+    let currentQuestionType = 'open';
 
     function joinQuiz(message = 'Joining game...') {
       storedName = localStorage.getItem('playerName');
@@ -193,7 +275,7 @@
       lobbyStatus.textContent = 'Unable to join. Please re-enter the code and nickname.';
     });
 
-    socket.on('question:start', ({ prompt, index, total, duration, media }) => {
+    socket.on('question:start', ({ prompt, index, total, duration, media, type, options }) => {
       questionProgress.textContent = `Question ${index} of ${total}`;
       questionText.textContent = prompt;
       answerFeedback.textContent = '';
@@ -203,7 +285,7 @@
       lobbyStatus.textContent = '';
       resetInputEngagement();
       applyAnswerInputSafeguards();
-      answerForm.classList.remove('hidden');
+      showAnswerMode(type, options);
       setAnswerWaiting(false);
       answerInput.value = '';
       lastSubmittedAnswer = '';
@@ -225,8 +307,16 @@
       showCorrectAnswer(`Correct answer: ${correctAnswer}`);
       const answerText = playerHasAnswered && lastSubmittedAnswer ? lastSubmittedAnswer : 'No answer submitted';
       showPlayerAnswer(`Your answer: ${answerText}`);
-      answerForm.classList.add('hidden');
-      setAnswerWaiting(false);
+      if (currentQuestionType === 'multiple') {
+        answerForm.classList.add('hidden');
+        choiceForm.classList.remove('hidden');
+        revealChoiceResult(correctAnswer, lastSubmittedAnswer);
+        setAnswerWaiting(true);
+      } else {
+        answerForm.classList.add('hidden');
+        choiceForm.classList.add('hidden');
+        setAnswerWaiting(false);
+      }
       stopMedia(questionMedia);
       questionMedia.innerHTML = '';
       resetInputEngagement();
@@ -249,6 +339,7 @@
       questionProgress.textContent = 'Quiz finished';
       questionText.textContent = 'Quiz finished! Check the leaderboard for final scores.';
       answerForm.classList.add('hidden');
+      choiceForm.classList.add('hidden');
       setAnswerWaiting(false);
       resetInputEngagement();
       stopMedia(questionMedia);
@@ -262,6 +353,7 @@
       questionProgress.textContent = 'Quiz closed';
       questionText.textContent = 'The host left the game. Quiz closed.';
       answerForm.classList.add('hidden');
+      choiceForm.classList.add('hidden');
       setAnswerWaiting(false);
       resetInputEngagement();
       stopMedia(questionMedia);
@@ -275,6 +367,7 @@
       questionProgress.textContent = 'Quiz closed';
       questionText.textContent = reason === 'deleted' ? 'This quiz was deleted by the teacher.' : 'Quiz closed.';
       answerForm.classList.add('hidden');
+      choiceForm.classList.add('hidden');
       questionMedia.innerHTML = '';
       timerEl.textContent = '--';
     });
@@ -299,8 +392,16 @@
       showPlayerAnswer(`Your answer: ${answerText}`);
       playerHasAnswered = true;
       resetInputEngagement();
-      answerForm.classList.add('hidden');
-      setAnswerWaiting(false);
+      if (currentQuestionType === 'multiple') {
+        answerForm.classList.add('hidden');
+        choiceForm.classList.remove('hidden');
+        revealChoiceResult(correctAnswer, lastSubmittedAnswer);
+        setAnswerWaiting(true);
+      } else {
+        answerForm.classList.add('hidden');
+        choiceForm.classList.add('hidden');
+        setAnswerWaiting(false);
+      }
     });
 
     socket.on('leaderboard:update', (players) => {
@@ -324,12 +425,20 @@
         lobbyStatus.textContent = '';
         setAnswerWaiting(hasAnswered);
         playerHasAnswered = hasAnswered;
+        showAnswerMode(question.type, question.options || []);
         if (hasAnswered) {
           answerForm.classList.add('hidden');
+          choiceForm.classList.add('hidden');
           answerFeedback.textContent = '';
           answerFeedback.className = '';
         } else {
-          answerForm.classList.remove('hidden');
+          if (currentQuestionType === 'multiple') {
+            choiceForm.classList.remove('hidden');
+            answerForm.classList.add('hidden');
+          } else {
+            answerForm.classList.remove('hidden');
+            choiceForm.classList.add('hidden');
+          }
           resetInputEngagement();
           answerInput.value = '';
           answerFeedback.textContent = '';
@@ -344,6 +453,7 @@
         questionProgress.textContent = 'Waiting for host...';
         questionText.textContent = 'Waiting for the host to start...';
         answerForm.classList.add('hidden');
+        choiceForm.classList.add('hidden');
         setAnswerWaiting(false);
         resetInputEngagement();
         answerFeedback.textContent = '';
@@ -448,6 +558,9 @@
     function setAnswerWaiting(isWaiting) {
       answerInput.disabled = isWaiting;
       submitButton.disabled = isWaiting;
+      choiceGrid.querySelectorAll('button').forEach((button) => {
+        button.disabled = isWaiting;
+      });
     }
 
     function handleInputFocus() {
@@ -539,7 +652,8 @@
       if (!Array.isArray(players)) return;
       players.forEach((player, index) => {
         const li = document.createElement('li');
-        li.innerHTML = `<span>${index + 1}. ${player.name}</span><span>${player.score} pts</span>`;
+        const correctCount = Number(player.correctCount) || 0;
+        li.innerHTML = `<span>${index + 1}. ${player.name}</span><span>${player.score} pts · ${correctCount} correct</span>`;
         leaderboard.appendChild(li);
       });
     }

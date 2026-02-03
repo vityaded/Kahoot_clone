@@ -33,10 +33,16 @@
       </div>
       <h2 id="question-text">Loading question...</h2>
       <div class="media-preview" id="question-media"></div>
-      <label>
-        Your answer
-        <input type="text" id="answer-input" autocomplete="off" autocapitalize="off" autocorrect="off" />
-      </label>
+      <div id="answer-input-row">
+        <label>
+          Your answer
+          <input type="text" id="answer-input" autocomplete="off" autocapitalize="off" autocorrect="off" />
+        </label>
+      </div>
+      <div id="choice-group" class="choice-group hidden">
+        <p class="eyebrow">Choose an option</p>
+        <div id="choice-grid" class="choice-grid"></div>
+      </div>
       <div class="cta-row">
         <button type="button" id="next-question">Next</button>
       </div>
@@ -102,6 +108,9 @@
     const questionDuration = document.getElementById('question-duration');
     const questionMedia = document.getElementById('question-media');
     const answerInput = document.getElementById('answer-input');
+    const answerInputRow = document.getElementById('answer-input-row');
+    const choiceGroup = document.getElementById('choice-group');
+    const choiceGrid = document.getElementById('choice-grid');
     const nextQuestionButton = document.getElementById('next-question');
     const reviewList = document.getElementById('review-list');
     const scoreDisplay = document.getElementById('score-display');
@@ -276,6 +285,40 @@
       }
     }
 
+    function renderChoiceButtons(options = [], selected = '') {
+      choiceGrid.innerHTML = '';
+      const list = Array.isArray(options) ? options : [];
+      if (!list.length) return;
+      list.forEach((option) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'choice-button';
+        button.textContent = option;
+        if (option === selected) {
+          button.classList.add('selected');
+        }
+        button.addEventListener('click', () => {
+          answerInput.value = option;
+          answers[currentIndex] = option;
+          choiceGrid.querySelectorAll('.choice-button').forEach((entry) => {
+            entry.classList.toggle('selected', entry.textContent === option);
+          });
+        });
+        choiceGrid.appendChild(button);
+      });
+    }
+
+    function showQuestionInput(question) {
+      const isMultiple = String(question?.type ?? '').toLowerCase() === 'multiple';
+      answerInputRow.classList.toggle('hidden', isMultiple);
+      choiceGroup.classList.toggle('hidden', !isMultiple);
+      if (isMultiple) {
+        renderChoiceButtons(question.options || [], answers[currentIndex] || '');
+      } else {
+        choiceGrid.innerHTML = '';
+      }
+    }
+
     function showCard(card) {
       [introCard, questionCard, completionCard].forEach((panel) => {
         panel.classList.toggle('hidden', panel !== card);
@@ -295,7 +338,10 @@
         attemptAutoplay(mediaEl, questionMedia);
       }
       answerInput.value = answers[index] || '';
-      answerInput.focus();
+      showQuestionInput(question);
+      if (String(question?.type ?? '').toLowerCase() !== 'multiple') {
+        answerInput.focus();
+      }
       nextQuestionButton.textContent = index === questions.length - 1 ? 'Submit homework' : 'Next';
       startTimer(question.duration);
     }
@@ -427,7 +473,7 @@
     }
 
     function restoreFocus() {
-      if (!questionCard.classList.contains('hidden')) {
+      if (!questionCard.classList.contains('hidden') && !answerInputRow.classList.contains('hidden')) {
         answerInput.focus();
       }
     }

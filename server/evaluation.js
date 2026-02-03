@@ -146,6 +146,24 @@ export async function evaluateAnswer(question, submission, options = {}) {
     gradingCondition = '',
   } = options;
 
+  const questionType = String(question?.type ?? '').toLowerCase();
+  if (questionType === 'multiple') {
+    const normalizedSubmitted = normaliseAnswer(submission ?? '');
+    const normalizedCorrect = normaliseAnswer(question?.answer ?? '');
+    const isCorrect = Boolean(normalizedSubmitted && normalizedCorrect && normalizedSubmitted === normalizedCorrect);
+    const speedBonus = calculateSpeedBonus(durationMs, timeRemainingMs, includeSpeedBonus);
+    const baseScore = 1000 + speedBonus;
+    const earned = isCorrect ? baseScore : 0;
+    return {
+      isCorrect,
+      isPartial: false,
+      earned,
+      correctAnswer: question?.answer ?? '',
+      playerAnswer: submission ?? '',
+      judgedBy: 'choice',
+    };
+  }
+
   const expectedAnswers = [question.answer, ...(question.alternateAnswers || [])].filter(Boolean);
   const normalizedSubmitted = normaliseAnswer(submission ?? '');
   const normalizedExpected = expectedAnswers.map(normaliseAnswer);

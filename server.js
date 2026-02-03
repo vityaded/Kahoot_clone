@@ -330,6 +330,7 @@ function serializeLiveSessions() {
       id: player.id,
       name: player.name,
       score: player.score,
+      correctCount: player.correctCount || 0,
       lastSeen: player.lastSeen,
       socketId: null,
     })),
@@ -359,6 +360,7 @@ async function loadPersistedLiveSessions() {
           socketId: null,
           name: player.name || '',
           score: Number(player.score) || 0,
+          correctCount: Number(player.correctCount) || 0,
           disconnectTimer: null,
           isConnected: false,
           disconnectedAt: null,
@@ -387,6 +389,8 @@ async function loadPersistedLiveSessions() {
         questionStart: null,
         answers: new Set(Array.isArray(entry.answers) ? entry.answers : []),
         questionActive: false,
+        currentQuestionOptions: null,
+        currentQuestionOptionsIndex: null,
         createdAt: entry.createdAt || Date.now(),
         questionTimer: null,
         leaderboardTimer: null,
@@ -414,7 +418,7 @@ function buildMediaPayload(media) {
 function formatLeaderboard(session) {
   return Array.from(session.players.values())
     .sort((a, b) => b.score - a.score)
-    .map(({ name, score }) => ({ name, score }));
+    .map(({ name, score, correctCount }) => ({ name, score, correctCount: correctCount || 0 }));
 }
 
 function formatHomeworkLeaderboard(session) {
@@ -451,14 +455,60 @@ function normalizeQuestionDuration(raw) {
   return clamped;
 }
 
+function resolveQuestionType(raw) {
+  const type = String(raw ?? '').trim().toLowerCase();
+  return type === 'multiple' || type === 'multiple-choice' || type === 'mc' ? 'multiple' : 'open';
+}
+
+function sanitizeIncorrectOptions(raw = [], correctAnswer = '') {
+  const normalizedCorrect = normaliseAnswer(correctAnswer);
+  const seen = new Set();
+  const cleaned = [];
+
+  raw.forEach((option) => {
+    const trimmed = String(option ?? '').trim();
+    if (!trimmed) return;
+    const normalized = normaliseAnswer(trimmed);
+    if (!normalized || normalized === normalizedCorrect || seen.has(normalized)) return;
+    seen.add(normalized);
+    cleaned.push(trimmed);
+  });
+
+  return cleaned;
+}
+
 function sanitizeQuestions(rawQuestions = [], { context } = {}) {
   const quizContext = String(context ?? '').trim();
   return rawQuestions
     .filter((q) => q && q.prompt)
     .map((q) => {
       const duration = normalizeQuestionDuration(q.duration);
+      const type = resolveQuestionType(q.type);
+      const prompt = q.prompt.trim();
+      const media = buildMediaPayload(q.media);
+
+      if (type === 'multiple') {
+        const correctOption = String(q.answer ?? q.correctOption ?? '').trim();
+        let incorrectOptions = Array.isArray(q.incorrectOptions) ? q.incorrectOptions : [];
+        if (!incorrectOptions.length && Array.isArray(q.options)) {
+          const normalizedCorrect = normaliseAnswer(correctOption);
+          incorrectOptions = q.options.filter((option) => normaliseAnswer(option) !== normalizedCorrect);
+        }
+        const cleanedIncorrect = sanitizeIncorrectOptions(incorrectOptions, correctOption);
+
+        return {
+          prompt,
+          type,
+          answer: correctOption,
+          incorrectOptions: cleanedIncorrect,
+          media,
+          ...(duration ? { duration } : {}),
+        };
+      }
+
       return {
-        prompt: q.prompt.trim(),
+        prompt,
+        type,
         answer: String(q.answer ?? '').trim(),
         alternateAnswers: Array.isArray(q.alternateAnswers)
           ? q.alternateAnswers.map((alt) => alt.trim()).filter(Boolean)
@@ -466,11 +516,16 @@ function sanitizeQuestions(rawQuestions = [], { context } = {}) {
         partialAnswers: Array.isArray(q.partialAnswers)
           ? q.partialAnswers.map((alt) => alt.trim()).filter(Boolean)
           : [],
-        media: buildMediaPayload(q.media),
+        media,
         ...(duration ? { duration } : {}),
       };
     })
-    .filter((q) => q.prompt && (q.answer || quizContext));
+    .filter((q) => {
+      if (q.type === 'multiple') {
+        return q.prompt && q.answer && Array.isArray(q.incorrectOptions) && q.incorrectOptions.length >= 3;
+      }
+      return q.prompt && (q.answer || quizContext);
+    });
 }
 
 function collectMediaSrcsFromQuestions(questions = []) {
@@ -522,7 +577,7 @@ function updateQuizTemplate(quizId, { title, questions, questionDuration, contex
 
   const sanitizedQuestions = sanitizeQuestions(questions, { context });
   if (!sanitizedQuestions.length) {
-    return { error: 'Each question needs a prompt and either an expected answer or quiz context.' };
+    return { error: 'Each question needs a prompt and either an expected answer (or correct option) or quiz context.' };
   }
 
   template.title = title?.trim() || 'Classroom Quiz';
@@ -544,8 +599,11 @@ function createHomeworkSession(template, { dueAt = null } = {}) {
     const text = question.answer?.trim() || question.prompt?.trim() || '';
     const wordCount = Math.max(text.split(/\s+/).filter(Boolean).length || 0, 1);
     const duration = 20 + 10 * (wordCount - 1);
-
-    return { ...question, duration };
+    const payload = { ...question, duration };
+    if (payload.type === 'multiple') {
+      payload.shuffledOptions = buildShuffledOptions(payload);
+    }
+    return payload;
   });
 
   const homeworkId = generateQuizCode();
@@ -623,6 +681,8 @@ function clearQuestionState(session) {
   session.questionActive = false;
   session.questionStart = null;
   session.answers = new Set();
+  session.currentQuestionOptions = null;
+  session.currentQuestionOptionsIndex = null;
   if (session.questionTimer) {
     clearTimeout(session.questionTimer);
     session.questionTimer = null;
@@ -707,6 +767,38 @@ function shuffleInPlace(array) {
   }
 }
 
+function buildMultipleChoiceOptions(question) {
+  const correct = String(question?.answer ?? '').trim();
+  const incorrect = Array.isArray(question?.incorrectOptions) ? question.incorrectOptions : [];
+  const normalizedCorrect = normaliseAnswer(correct);
+  const seen = new Set();
+  const options = [];
+
+  if (normalizedCorrect) {
+    seen.add(normalizedCorrect);
+    options.push(correct);
+  }
+
+  incorrect.forEach((option) => {
+    const trimmed = String(option ?? '').trim();
+    if (!trimmed) return;
+    const normalized = normaliseAnswer(trimmed);
+    if (!normalized || normalized === normalizedCorrect || seen.has(normalized)) return;
+    seen.add(normalized);
+    options.push(trimmed);
+  });
+
+  return options;
+}
+
+function buildShuffledOptions(question) {
+  const options = buildMultipleChoiceOptions(question);
+  if (options.length <= 1) return options;
+  const shuffled = options.slice();
+  shuffleInPlace(shuffled);
+  return shuffled;
+}
+
 function buildRunQuestions(baseQuestions, { count, shuffle } = {}) {
   const cloned = Array.isArray(baseQuestions) ? baseQuestions.slice() : [];
   const max = cloned.length;
@@ -739,6 +831,8 @@ function createSessionFromTemplate(template, hostId = null) {
     questionStart: null,
     answers: new Set(),
     questionActive: false,
+    currentQuestionOptions: null,
+    currentQuestionOptionsIndex: null,
     createdAt: Date.now(),
     questionTimer: null,
     leaderboardTimer: null,
@@ -787,6 +881,34 @@ function findPlayerSession(playerId, quizId = null) {
 function emitPlayerState(socket, session, playerId = null) {
   const currentQuestion = session.questions[session.currentQuestionIndex];
   const questionDuration = resolveQuestionDuration(session);
+  let questionPayload = null;
+
+  if (session.questionActive && currentQuestion) {
+    const questionType = resolveQuestionType(currentQuestion.type);
+    let options = null;
+    if (questionType === 'multiple') {
+      const needsOptions =
+        session.currentQuestionOptionsIndex !== session.currentQuestionIndex ||
+        !Array.isArray(session.currentQuestionOptions) ||
+        session.currentQuestionOptions.length === 0;
+      if (needsOptions) {
+        session.currentQuestionOptions = buildShuffledOptions(currentQuestion);
+        session.currentQuestionOptionsIndex = session.currentQuestionIndex;
+      }
+      options = session.currentQuestionOptions;
+    }
+
+    questionPayload = {
+      prompt: currentQuestion.prompt,
+      index: session.currentQuestionIndex + 1,
+      total: session.questions.length,
+      duration: questionDuration,
+      media: currentQuestion.media,
+      type: questionType,
+      options,
+    };
+  }
+
   socket.emit('player:state', {
     quizId: session.id,
     title: session.title,
@@ -794,15 +916,7 @@ function emitPlayerState(socket, session, playerId = null) {
     questionDuration: session.questionDuration,
     leaderboard: formatLeaderboard(session),
     questionActive: session.questionActive,
-    question: session.questionActive
-      ? {
-          prompt: currentQuestion.prompt,
-          index: session.currentQuestionIndex + 1,
-          total: session.questions.length,
-          duration: questionDuration,
-          media: currentQuestion.media,
-        }
-      : null,
+    question: questionPayload,
     timeRemaining: calculateTimeRemaining(session),
     hasAnswered: playerId ? session.answers.has(playerId) : false,
   });
@@ -872,12 +986,24 @@ function startQuestion(sessionId) {
 
   const currentQuestion = session.questions[nextIndex];
   const questionDuration = resolveQuestionDuration(session, nextIndex);
+  const questionType = resolveQuestionType(currentQuestion?.type);
+  let options = null;
+  if (questionType === 'multiple') {
+    options = buildShuffledOptions(currentQuestion);
+    session.currentQuestionOptions = options;
+    session.currentQuestionOptionsIndex = nextIndex;
+  } else {
+    session.currentQuestionOptions = null;
+    session.currentQuestionOptionsIndex = null;
+  }
   io.to(`${QUIZ_ROOM_PREFIX}${sessionId}`).emit('question:start', {
     prompt: currentQuestion.prompt,
     index: nextIndex + 1,
     total: session.questions.length,
     duration: questionDuration,
     media: currentQuestion.media,
+    type: questionType,
+    options,
   });
 
   session.questionTimer = setTimeout(() => endQuestion(sessionId), questionDuration * 1000);
@@ -918,7 +1044,7 @@ io.on('connection', (socket) => {
       }
       const template = createQuizTemplate({ title, questions, questionDuration, context, gradingCondition });
       if (!template) {
-        socket.emit('host:error', 'Each question needs a prompt and either an expected answer or quiz context.');
+        socket.emit('host:error', 'Each question needs a prompt and either an expected answer (or correct option) or quiz context.');
         return;
       }
 
@@ -1026,6 +1152,7 @@ io.on('connection', (socket) => {
       existingPlayer.isConnected = true;
       existingPlayer.disconnectedAt = null;
       existingPlayer.lastSeen = Date.now();
+      existingPlayer.correctCount = Number(existingPlayer.correctCount) || 0;
       if (!existingPlayer.name) {
         existingPlayer.name = displayName;
       }
@@ -1035,6 +1162,7 @@ io.on('connection', (socket) => {
         socketId: socket.id,
         name: displayName,
         score: 0,
+        correctCount: 0,
         disconnectTimer: null,
         isConnected: true,
         disconnectedAt: null,
@@ -1191,6 +1319,9 @@ io.on('connection', (socket) => {
     });
 
     player.score += evaluation.earned;
+    if (evaluation.isCorrect) {
+      player.correctCount = (player.correctCount || 0) + 1;
+    }
 
     session.answers.add(player.id);
     socket.emit('player:answerResult', {
@@ -1510,11 +1641,22 @@ app.get('/api/homework/:homeworkId', (req, res) => {
     createdAt: session.createdAt,
     dueAt: session.dueAt,
     questionCount: template?.questions?.length || 0,
-    questions: session.questions.map((question) => ({
-      prompt: question.prompt,
-      media: question.media,
-      duration: question.duration,
-    })),
+    questions: session.questions.map((question) => {
+      const type = resolveQuestionType(question.type);
+      const payload = {
+        prompt: question.prompt,
+        media: question.media,
+        duration: question.duration,
+        type,
+      };
+      if (type === 'multiple') {
+        const options = Array.isArray(question.shuffledOptions) && question.shuffledOptions.length
+          ? question.shuffledOptions
+          : buildShuffledOptions(question);
+        payload.options = options;
+      }
+      return payload;
+    }),
     leaderboard: formatHomeworkLeaderboard(session),
   });
 });

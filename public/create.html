@@ -29,6 +29,19 @@
           Seconds per question
           <input type="number" id="question-duration" value="20" min="5" max="120" />
         </label>
+        <div class="question-type-toggle">
+          <span class="muted">Question type</span>
+          <div class="toggle-options" role="radiogroup" aria-label="Question type">
+            <label class="toggle-option">
+              <input type="radio" name="question-type" value="open" checked />
+              <span>Open response</span>
+            </label>
+            <label class="toggle-option">
+              <input type="radio" name="question-type" value="multiple" />
+              <span>Multiple choice</span>
+            </label>
+          </div>
+        </div>
         <div class="questions" id="question-list"></div>
         <button type="button" class="ghost" id="add-question">+ Add question</button>
         <label>
@@ -41,7 +54,8 @@
         </label>
         <div class="bulk-card">
           <h3>Bulk add questions</h3>
-          <p class="muted">Paste one question per line using pipes: <code>Question | Answer (optional) | Other acceptable answers</code>.</p>
+          <p class="muted" id="bulk-hint-open">Paste one question per line using pipes: <code>Question | Answer (optional) | Other acceptable answers</code>.</p>
+          <p class="muted hidden" id="bulk-hint-multiple">Paste one question per line using pipes: <code>Question | Correct option | Incorrect option | Incorrect option | Incorrect option</code>.</p>
           <textarea id="bulk-questions" rows="6" placeholder="What is the powerhouse of the cell? | Mitochondria | The mitochondrion"></textarea>
           <div class="cta-row">
             <button type="button" class="ghost" id="bulk-preview">Preview additions</button>
@@ -94,9 +108,14 @@
     const titleInput = document.getElementById('quiz-title');
     const contextInput = document.getElementById('quiz-context');
     const gradingConditionInput = document.getElementById('quiz-grading-condition');
+    const questionTypeInputs = document.querySelectorAll('input[name="question-type"]');
+    const bulkInput = document.getElementById('bulk-questions');
+    const bulkHintOpen = document.getElementById('bulk-hint-open');
+    const bulkHintMultiple = document.getElementById('bulk-hint-multiple');
     const params = new URLSearchParams(window.location.search);
     const editQuizId = params.get('quizId')?.trim()?.toUpperCase();
     const isEditMode = Boolean(editQuizId);
+    let currentQuestionType = 'open';
 
     if (isEditMode) {
       pageTitle.textContent = 'Edit Quiz';
@@ -119,23 +138,83 @@
       }
     }
 
-    function renderQuestionRow(index, prompt = '', answer = '', alternateAnswers = [], partialAnswers = [], media = null) {
+    function updateBulkHints() {
+      const isMultiple = currentQuestionType === 'multiple';
+      if (bulkHintOpen) bulkHintOpen.classList.toggle('hidden', isMultiple);
+      if (bulkHintMultiple) bulkHintMultiple.classList.toggle('hidden', !isMultiple);
+      if (bulkInput) {
+        bulkInput.placeholder = isMultiple
+          ? 'What is the powerhouse of the cell? | Mitochondria | Nucleus | Ribosome | Chloroplast'
+          : 'What is the powerhouse of the cell? | Mitochondria | The mitochondrion';
+      }
+    }
+
+    function applyQuestionTypeToRow(row) {
+      if (!row) return;
+      row.dataset.type = currentQuestionType;
+      const openFields = row.querySelector('.open-fields');
+      const choiceFields = row.querySelector('.choice-fields');
+      if (openFields) openFields.classList.toggle('hidden', currentQuestionType !== 'open');
+      if (choiceFields) choiceFields.classList.toggle('hidden', currentQuestionType !== 'multiple');
+    }
+
+    function applyQuestionTypeToRows() {
+      questionList.querySelectorAll('.question-row').forEach(applyQuestionTypeToRow);
+    }
+
+    function setQuestionType(type) {
+      currentQuestionType = type === 'multiple' ? 'multiple' : 'open';
+      questionTypeInputs.forEach((input) => {
+        input.checked = input.value === currentQuestionType;
+      });
+      applyQuestionTypeToRows();
+      updateBulkHints();
+    }
+
+    function renderQuestionRow(index, question = {}) {
+      const {
+        prompt = '',
+        answer = '',
+        alternateAnswers = [],
+        partialAnswers = [],
+        incorrectOptions = [],
+        media = null,
+      } = question;
+      const incorrect = Array.isArray(incorrectOptions) ? incorrectOptions : [];
+      const [incorrectOne = '', incorrectTwo = '', incorrectThree = ''] = incorrect;
       const wrapper = document.createElement('div');
       wrapper.className = 'question-row media';
       wrapper.innerHTML = `
         <div>
-          <label>Question ${index + 1}
+          <label class="question-prompt">
+            <span class="question-number" data-role="question-number">Question ${index + 1}</span>
             <input type="text" name="prompt" placeholder="What is photosynthesis?" value="${prompt}" required />
           </label>
-          <label>Expected answer
-            <input type="text" name="answer" placeholder="A process plants use to make food" value="${answer}" />
-          </label>
-          <label>Alternate answers (separate with ||)
-            <input type="text" name="alternate" placeholder="Other phrasing that should count as correct (use || between options)" value="${alternateAnswers.join(' || ')}" />
-          </label>
-          <label>Partial credit answers (synonyms or near-misses, use ||)
-            <input type="text" name="partial" placeholder="Counts for half points (use || between options)" value="${partialAnswers.join(' || ')}" />
-          </label>
+          <div class="open-fields">
+            <label>Expected answer
+              <input type="text" name="answer" placeholder="A process plants use to make food" value="${answer}" />
+            </label>
+            <label>Alternate answers (separate with ||)
+              <input type="text" name="alternate" placeholder="Other phrasing that should count as correct (use || between options)" value="${alternateAnswers.join(' || ')}" />
+            </label>
+            <label>Partial credit answers (synonyms or near-misses, use ||)
+              <input type="text" name="partial" placeholder="Counts for half points (use || between options)" value="${partialAnswers.join(' || ')}" />
+            </label>
+          </div>
+          <div class="choice-fields hidden">
+            <label>Correct option
+              <input type="text" name="correct" placeholder="Mitochondria" value="${answer}" />
+            </label>
+            <label>Incorrect option 1
+              <input type="text" name="incorrect-0" placeholder="Nucleus" value="${incorrectOne}" />
+            </label>
+            <label>Incorrect option 2
+              <input type="text" name="incorrect-1" placeholder="Ribosome" value="${incorrectTwo}" />
+            </label>
+            <label>Incorrect option 3
+              <input type="text" name="incorrect-2" placeholder="Chloroplast" value="${incorrectThree}" />
+            </label>
+          </div>
         </div>
         <div class="media-picker">
           <label class="file-label">Attach media (photo, audio, or video)
@@ -178,12 +257,16 @@
         wrapper.dataset.existingMedia = JSON.stringify(media);
         renderMediaPreview(preview, media);
       }
+      applyQuestionTypeToRow(wrapper);
       questionList.appendChild(wrapper);
     }
 
     function updateQuestionLabels() {
       questionList.querySelectorAll('.question-row').forEach((row, idx) => {
-        row.querySelector('label').innerHTML = `Question ${idx + 1}<input type="text" name="prompt" placeholder="What is photosynthesis?" value="${row.querySelector('input[name="prompt"]').value}" required />`;
+        const label = row.querySelector('[data-role="question-number"]');
+        if (label) {
+          label.textContent = `Question ${idx + 1}`;
+        }
       });
     }
 
@@ -201,6 +284,47 @@
       const questions = [];
       for (const [index, row] of rows.entries()) {
         const prompt = row.querySelector('input[name="prompt"]').value;
+        if (currentQuestionType === 'multiple') {
+          const correctOption = row.querySelector('input[name="correct"]').value;
+          const incorrectInputs = Array.from(row.querySelectorAll('input[name^="incorrect-"]'));
+          const incorrectOptions = incorrectInputs
+            .map((input) => input.value.trim())
+            .filter(Boolean);
+          if (!correctOption.trim()) {
+            throw new Error(`Question ${index + 1} needs a correct option.`);
+          }
+          if (incorrectOptions.length < 3) {
+            throw new Error(`Question ${index + 1} needs three incorrect options.`);
+          }
+
+          const mediaInput = row.querySelector('input[name="media"]');
+          const file = mediaInput?.files?.[0];
+          let media = null;
+          if (file) {
+            const src = await readFileAsDataURL(file);
+            let type = 'file';
+            if (file.type.startsWith('image/')) type = 'image';
+            else if (file.type.startsWith('audio/')) type = 'audio';
+            else if (file.type.startsWith('video/')) type = 'video';
+            media = { type, name: file.name, src };
+          } else if (row.dataset.existingMedia) {
+            try {
+              media = JSON.parse(row.dataset.existingMedia);
+            } catch (error) {
+              media = null;
+            }
+          }
+
+          questions.push({
+            prompt,
+            type: 'multiple',
+            answer: correctOption,
+            incorrectOptions,
+            media,
+          });
+          continue;
+        }
+
         const answer = row.querySelector('input[name="answer"]').value;
         if (!answer.trim() && !context.trim()) {
           throw new Error(`Question ${index + 1} needs an expected answer or quiz context for LLM grading.`);
@@ -234,6 +358,7 @@
         }
         questions.push({
           prompt,
+          type: 'open',
           answer,
           alternateAnswers,
           partialAnswers,
@@ -251,8 +376,18 @@
 
       const parsed = lines.map((line) => {
         const parts = line.split(/\|/).map((part) => part.trim());
-        const [prompt, answer = '', ...alternates] = parts;
-        return { prompt, answer, alternateAnswers: alternates.filter(Boolean) };
+        const [prompt, first = '', ...rest] = parts;
+
+        if (currentQuestionType === 'multiple') {
+          return {
+            prompt,
+            answer: first,
+            incorrectOptions: rest.filter(Boolean),
+            type: 'multiple',
+          };
+        }
+
+        return { prompt, answer: first, alternateAnswers: rest.filter(Boolean), type: 'open' };
       });
 
       return parsed.filter((q) => q.prompt);
@@ -264,27 +399,26 @@
       questions.forEach((q, idx) => {
         const item = document.createElement('div');
         item.className = 'preview-item';
-        const alternates = q.alternateAnswers.length ? ` | Variants: ${q.alternateAnswers.join(' || ')}` : '';
-        const answerText = q.answer ? ` → ${q.answer}` : '';
-        item.textContent = `${idx + 1}. ${q.prompt}${answerText}${alternates}`;
+        if (currentQuestionType === 'multiple') {
+          const options = [q.answer, ...(q.incorrectOptions || [])].filter(Boolean);
+          const optionText = options.length ? ` → ${options.join(' | ')}` : '';
+          item.textContent = `${idx + 1}. ${q.prompt}${optionText}`;
+        } else {
+          const alternates = q.alternateAnswers?.length ? ` | Variants: ${q.alternateAnswers.join(' || ')}` : '';
+          const answerText = q.answer ? ` → ${q.answer}` : '';
+          item.textContent = `${idx + 1}. ${q.prompt}${answerText}${alternates}`;
+        }
         preview.appendChild(item);
       });
     }
 
     function appendBulkQuestions(questions) {
       questions.forEach((q) => {
-        renderQuestionRow(
-          questionList.children.length,
-          q.prompt,
-          q.answer,
-          q.alternateAnswers,
-          q.partialAnswers,
-        );
+        renderQuestionRow(questionList.children.length, q);
       });
       updateQuestionLabels();
     }
 
-    const bulkInput = document.getElementById('bulk-questions');
     const bulkPreviewBtn = document.getElementById('bulk-preview');
     const bulkAddBtn = document.getElementById('bulk-add');
     const bulkError = document.getElementById('bulk-error');
@@ -296,6 +430,13 @@
         bulkError.textContent = 'Enter at least one line with a question.';
         return;
       }
+      if (currentQuestionType === 'multiple') {
+        const invalid = parsed.find((q) => !q.answer?.trim() || (q.incorrectOptions || []).length < 3);
+        if (invalid) {
+          bulkError.textContent = 'Each line needs a correct option and three incorrect options.';
+          return;
+        }
+      }
       renderBulkPreview(parsed);
     });
 
@@ -306,9 +447,24 @@
         bulkError.textContent = 'Enter at least one line with a question.';
         return;
       }
+      if (currentQuestionType === 'multiple') {
+        const invalid = parsed.find((q) => !q.answer?.trim() || (q.incorrectOptions || []).length < 3);
+        if (invalid) {
+          bulkError.textContent = 'Each line needs a correct option and three incorrect options.';
+          return;
+        }
+      }
       appendBulkQuestions(parsed);
       renderBulkPreview([]);
       bulkInput.value = '';
+    });
+
+    questionTypeInputs.forEach((input) => {
+      input.addEventListener('change', () => {
+        if (input.checked) {
+          setQuestionType(input.value);
+        }
+      });
     });
 
     addQuestionBtn.addEventListener('click', () => renderQuestionRow(questionList.children.length));
@@ -397,21 +553,41 @@
         questionDurationInput.value = data.questionDuration || 20;
         contextInput.value = data.context || '';
         gradingConditionInput.value = data.gradingCondition || '';
-        (data.questions || []).forEach((question, index) => {
-          renderQuestionRow(
-            index,
-            question.prompt || '',
-            question.answer || '',
-            question.alternateAnswers || [],
-            question.partialAnswers || [],
-            question.media || null,
-          );
+        const questionsData = Array.isArray(data.questions) ? data.questions : [];
+        const hasMultiple = questionsData.some((question) => {
+          const type = String(question?.type ?? '').toLowerCase();
+          if (type === 'multiple' || type === 'multiple-choice' || type === 'mc') return true;
+          const incorrectOptions = Array.isArray(question?.incorrectOptions)
+            ? question.incorrectOptions.filter((option) => String(option ?? '').trim())
+            : [];
+          if (incorrectOptions.length) return true;
+          const options = Array.isArray(question?.options)
+            ? question.options.filter((option) => String(option ?? '').trim())
+            : [];
+          return options.length >= 2;
+        });
+        setQuestionType(hasMultiple ? 'multiple' : 'open');
+        questionsData.forEach((question, index) => {
+          const incorrectOptions = Array.isArray(question.incorrectOptions)
+            ? question.incorrectOptions
+            : Array.isArray(question.options)
+              ? question.options.filter((option) => String(option).trim() !== String(question.answer ?? '').trim())
+              : [];
+          renderQuestionRow(index, {
+            prompt: question.prompt || '',
+            answer: question.answer || '',
+            alternateAnswers: question.alternateAnswers || [],
+            partialAnswers: question.partialAnswers || [],
+            incorrectOptions,
+            media: question.media || null,
+          });
         });
         if (!questionList.children.length) {
           renderQuestionRow(0);
         }
       } catch (error) {
         formError.textContent = error?.message || 'Unable to load quiz for editing.';
+        setQuestionType('open');
         if (!questionList.children.length) {
           renderQuestionRow(0);
         }
@@ -421,6 +597,7 @@
     if (isEditMode) {
       loadQuizForEdit();
     } else {
+      setQuestionType('open');
       renderQuestionRow(0);
     }
   </script>
